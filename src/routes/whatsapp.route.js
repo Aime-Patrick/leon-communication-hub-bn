@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const whatsapp_controller_1 = require("../modules/whatsapp/controller/whatsapp.controller");
+const asyncHandler_1 = require("../utils/asyncHandler");
+const router = (0, express_1.Router)();
+router.get('/webhook', whatsapp_controller_1.verifyWebhook);
+router.post('/webhook', (0, asyncHandler_1.asyncHandler)(whatsapp_controller_1.receiveMessage));
+router.get('/messages', (0, asyncHandler_1.asyncHandler)(whatsapp_controller_1.getMessages));
+router.get('/messages/:phoneNumber', (0, asyncHandler_1.asyncHandler)(whatsapp_controller_1.getMessagesByPhoneNumber));
+router.post('/send-message', (0, asyncHandler_1.asyncHandler)(whatsapp_controller_1.sendWhatsAppMessage));
+exports.default = router;
