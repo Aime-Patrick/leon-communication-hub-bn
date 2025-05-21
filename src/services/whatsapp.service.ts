@@ -1,12 +1,10 @@
 import axios from 'axios';
 import WhatsAppMessage from '../models/whatsappMessage.model';
 import dotenv from 'dotenv';
+import { io } from '../server';
 dotenv.config();
 const WHATSAPP_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN!;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID!;
-
-console.log('WhatsApp Token:', WHATSAPP_TOKEN);
-console.log('WhatsApp Phone Number ID:', PHONE_NUMBER_ID);
 
 export const handleIncomingMessage = async (message: any) => {
   const from = message.from;
@@ -21,6 +19,12 @@ export const handleIncomingMessage = async (message: any) => {
 
   // Echo back the message
   await sendMessage(from, `Received: ${text}`);
+
+  io.emit('new_message', {
+    from,
+    message: text,
+    timestamp: new Date(),
+  });
 };
 
 export const sendMessage = async (to: string, text: string) => {

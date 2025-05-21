@@ -1,9 +1,10 @@
 import { Request, Response } from "express";
-import { handleIncomingMessage, sendMessage } from "../../../service/whatsapp.service";
+import { handleIncomingMessage, sendMessage } from "../../../services/whatsapp.service";
 import WhatsAppMessage from "../../../models/whatsappMessage.model";
 import dotenv from "dotenv";
 dotenv.config();
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
+console.log(VERIFY_TOKEN)
 
 export const verifyWebhook = (req: Request, res: Response) => {
   const mode = req.query["hub.mode"];
