@@ -7,17 +7,18 @@ import {
     forgotPasswordAdmin,
     forgotPasswordUser,
     resetPasswordWithToken,
-    resetPasswordWithOTP
+    resetPasswordWithOTP,
+    getProfile
 } from '../controllers/user.controller';
 
 const router = Router();
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
+    destination: (_req, _file, cb) => {
         cb(null, 'uploads/');
     },
-    filename: (req, file, cb) => {
+    filename: (_req, file, cb) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         cb(null, file.fieldname + '-' + uniqueSuffix + '.' + file.originalname.split('.').pop());
     }
@@ -28,7 +29,7 @@ const upload = multer({
     limits: {
         fileSize: 5 * 1024 * 1024 // 5MB limit
     },
-    fileFilter: (req, file, cb) => {
+    fileFilter: (_req, file, cb) => {
         if (file.mimetype.startsWith('image/')) {
             cb(null, true);
         } else {
@@ -36,6 +37,9 @@ const upload = multer({
         }
     }
 });
+
+// Get user profile
+router.get('/profile', auth.protect, getProfile as any);
 
 // Update profile
 router.put('/profile',

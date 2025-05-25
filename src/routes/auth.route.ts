@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import { google } from 'googleapis';
 import { GMAIL_CONFIG } from '../config/gmail.config';
 import { body } from 'express-validator';
-import { auth } from '../middleware/auth';
+import { auth, protect } from '../middleware/auth';
 import {
     login,
     register,
@@ -124,13 +124,12 @@ router.post('/register',
     ],
     register as any
 );
-
 // Get user profile
-router.get('/profile', auth.protect, getProfile as any);
+router.get('/profile', protect, getProfile as any);
 
 // Change password
 router.put('/change-password',
-    auth.protect,
+    protect as any,
     [
         body('currentPassword').notEmpty().withMessage('Current password is required'),
         body('newPassword')

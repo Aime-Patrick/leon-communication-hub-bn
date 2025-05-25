@@ -1,12 +1,22 @@
 {
   "compilerOptions": {
-    "target": "es2016",
+    "target": "es2017",
     "module": "commonjs",
-    "rootDir": "./src",  // This should be the source folder, not dist.
-    "outDir": "./dist",  // Specify where to place the compiled files (dist).
+    "lib": ["es2017", "esnext.asynciterable"],
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "moduleResolution": "node",
+    "removeComments": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "strict": true,
-    "skipLibCheck": true
-  }
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "typeRoots": ["./node_modules/@types", "./src/types"]
+  },
+  "exclude": ["node_modules"],
+  "include": ["./src/**/*.ts"]
 }

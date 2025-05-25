@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
 import { User, IUser } from '../models/User';
-import { Types } from 'mongoose';
+import crypto from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -66,27 +66,6 @@ export const verifyResetToken = async (token: string): Promise<string | null> =>
     }
 };
 
-export const protect = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (!token) {
-            res.status(401).json({ message: 'Not authorized' });
-            return;
-        }
-
-        const user = await verifyToken(token);
-        if (!user) {
-            res.status(401).json({ message: 'Not authorized' });
-            return;
-        }
-
-        req.user = user;
-        next();
-    } catch (error) {
-        res.status(401).json({ message: 'Not authorized' });
-    }
-};
-
 export const admin = (req: Request, res: Response, next: NextFunction): void => {
     if (req.user?.role !== 'ADMIN') {
         res.status(403).json({ message: 'Not authorized as admin' });
@@ -103,17 +82,11 @@ export const user = (req: Request, res: Response, next: NextFunction): void => {
     next();
 };
 
-export const any = (req: Request, res: Response, next: NextFunction): void => {
+export const any = (_req: Request, _res: Response, next: NextFunction): void => {
     next();
 };
 
-export const auth = {
-    protect,
-    admin: [protect, admin],
-    user: [protect, user],
-    any: [protect]
-};
 
 export const generateOTP = (): string => {
     return Math.floor(100000 + Math.random() * 900000).toString();
-}; 
+};

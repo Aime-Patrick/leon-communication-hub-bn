@@ -1,4 +1,4 @@
-import mongoose, { Document, Types } from 'mongoose';
+import mongoose, { Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 export interface IUser extends Document {
@@ -10,6 +10,20 @@ export interface IUser extends Document {
     resetPasswordToken?: string;
     resetPasswordExpires?: Date;
     isFirstLogin: boolean;
+    gmailRefreshToken?: string;
+    gmailAccessToken?: string;
+    gmailAccessTokenExpires?: Date;
+
+    // --- NEW FACEBOOK FIELDS ---
+    facebookAccessToken?: string;
+    facebookAccessTokenExpires?: Date;
+    facebookAdAccountId?: string; // The ID of the ad account the user wants to manage (e.g., 'act_12345')
+    facebookBusinessId?: string;  // The ID of the business account the user wants to manage
+    // If you plan to manage multiple pages per user, consider a separate 'Page' model
+    // For simplicity, if a user primarily manages one page for marketing, you could store it here:
+    facebookPageId?: string;      // The ID of a primary Facebook Page associated with this user
+    facebookPageAccessToken?: string; // The access token for the primary Facebook Page
+
     createdAt: Date;
     updatedAt: Date;
 }
@@ -42,15 +56,50 @@ const userSchema = new mongoose.Schema({
     isFirstLogin: {
         type: Boolean,
         default: true
+    },
+    gmailRefreshToken: String,
+    gmailAccessToken: String,
+    gmailAccessTokenExpires: Date,
+
+    // --- NEW FACEBOOK SCHEMA FIELDS ---
+    facebookAccessToken: {
+        type: String,
+        required: false // Not required until user connects Facebook
+    },
+    facebookAccessTokenExpires: {
+        type: Date,
+        required: false
+    },
+    facebookAdAccountId: {
+        type: String,
+        required: false
+    },
+    facebookBusinessId: {
+        type: String,
+        required: false
+    },
+    facebookPageId: {
+        type: String,
+        required: false
+    },
+    facebookPageAccessToken: {
+        type: String,
+        required: false
     }
 }, {
     timestamps: true,
     toJSON: {
-        transform: (doc, ret) => {
+        transform: (_doc, ret) => {
             ret.id = ret._id;
             delete ret._id;
             delete ret.__v;
-            delete ret.password;
+            delete ret.password; // Always omit password from JSON output
+            // Optionally omit tokens from JSON output for security, unless explicitly needed client-side
+            delete ret.facebookAccessToken;
+            delete ret.facebookAccessTokenExpires;
+            delete ret.gmailRefreshToken;
+            delete ret.gmailAccessToken;
+            delete ret.gmailAccessTokenExpires;
             return ret;
         }
     }
@@ -69,4 +118,4 @@ userSchema.pre('save', async function(next) {
     }
 });
 
-export const User = mongoose.model<IUser>('User', userSchema); 
+export const User = mongoose.model<IUser>('User', userSchema);

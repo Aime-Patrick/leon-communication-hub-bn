@@ -1,14 +1,11 @@
 import { Request, Response, RequestHandler } from 'express';
-import { User, IUser } from '../models/User';
+import { User } from '../models/User';
 import bcrypt from 'bcryptjs';
 import { generateToken, generateResetToken } from '../utils/auth';
 import { getResetPasswordEmailTemplate } from '../templates/resetPasswordEmail';
 import { sendEmail } from '../utils/email';
-import { Types } from 'mongoose';
 import { verifyResetToken } from '../utils/auth';
-interface AuthRequest extends Request {
-    user?: IUser;
-}
+import { AuthRequest } from '../middleware/auth';
 
 // Login user
 export const login: RequestHandler = async (req: Request, res: Response): Promise<void> => {
@@ -26,9 +23,6 @@ export const login: RequestHandler = async (req: Request, res: Response): Promis
 
         // Check password
         const isMatch = await bcrypt.compare(password, user.password);
-        console.log('Password match result:', isMatch);
-        console.log('Stored hashed password:', user.password);
-        console.log('Attempted password:', password);
 
         if (!isMatch) {
             res.status(401).json({ error: 'Invalid credentials' });
@@ -38,21 +32,49 @@ export const login: RequestHandler = async (req: Request, res: Response): Promis
         // Generate token
         const token = generateToken(user);
 
-        // If this is the first login, update isFirstLogin to false
-        if (user.isFirstLogin) {
-            user.isFirstLogin = false;
-            await user.save();
-        }
+        // Set session data
+        (req as any).session.userId = user._id;
+        (req as any).session.user = {
+            id: user._id,
+            email: user.email,
+            role: user.role
+        };
 
-        res.json({
-            token,
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                isFirstLogin: user.isFirstLogin
+        // Save session
+        (req as any).session.save((err: any) => {
+            if (err) {
+                console.error('Error saving session:', err);
+                res.status(500).json({ error: 'Failed to create session' });
+                return;
             }
+
+            // If this is the first login, update isFirstLogin to false
+            if (user.isFirstLogin) {
+                user.isFirstLogin = false;
+                user.save().catch(err => console.error('Error updating isFirstLogin:', err));
+            }
+
+            console.log('Session created for user:', {
+                userId: user._id,
+                sessionId: (req as any).sessionID
+            });
+
+            res.json({
+                token,
+                user: {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role,
+                    isFirstLogin: user.isFirstLogin,
+                    // Include Facebook-related data
+                    facebookAccessToken: user.facebookAccessToken,
+                    facebookAdAccountId: user.facebookAdAccountId,
+                    facebookBusinessId: user.facebookBusinessId,
+                    facebookPageId: user.facebookPageId,
+                    facebookPageAccessToken: user.facebookPageAccessToken
+                }
+            });
         });
     } catch (error) {
         console.error('Login error:', error);

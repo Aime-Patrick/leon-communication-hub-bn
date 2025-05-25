@@ -17,8 +17,8 @@ export const handleIncomingMessage = async (message: any) => {
     message: text,
   });
 
-  // Echo back the message
-  await sendMessage(from, `Received: ${text}`);
+  // // Echo back the message
+  // await sendMessage(from, `Received: ${text}`);
 
   io.emit('new_message', {
     from,

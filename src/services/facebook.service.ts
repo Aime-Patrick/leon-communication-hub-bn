@@ -1,8 +1,9 @@
 import { AdAccount, Campaign, AdSet, Ad, AbstractCrudObject, User, Business, FacebookAdsApi, Page } from 'facebook-nodejs-business-sdk';
 import { FACEBOOK_CONFIG, initializeFacebookAPI } from '../config/facebook.config';
+import axios from 'axios'; // For making HTTP requests to Facebook's Graph API directly
 
 // Type definitions for campaign data
-export type CampaignObjective = 
+export type CampaignObjective =
     | 'OUTCOME_TRAFFIC'
     | 'OUTCOME_AWARENESS'
     | 'OUTCOME_ENGAGEMENT'
@@ -59,7 +60,7 @@ export interface CampaignData {
 }
 
 // Add type definitions for Page creation
-export type PageCategory = 
+export type PageCategory =
     | 'Business'
     | 'Company'
     | 'Organization'
@@ -102,7 +103,7 @@ export interface PageCreationResponse {
     id: string;
     name: string;
     category: string;
-    access_token: string;
+    access_token: string; // This is the page access token
     tasks?: string[];
     perms?: string[];
 }
@@ -110,30 +111,132 @@ export interface PageCreationResponse {
 export class FacebookService {
     private api: FacebookAdsApi;
     private adAccount: AdAccount;
+    private accessToken: string;
+    private adAccountId: string;
 
-    constructor() {
+    constructor(accessToken: string, adAccountId: string) {
         try {
-            this.api = initializeFacebookAPI();
-            this.adAccount = new AdAccount(FACEBOOK_CONFIG.adAccountId);
+            this.accessToken = accessToken;
+            
+            // Fix the adAccountId: Ensure it's not empty and formatted correctly
+            if (!adAccountId || adAccountId.trim() === '') {
+                throw new Error('Ad Account ID cannot be empty. Please ensure FACEBOOK_AD_ACCOUNT_ID is set in your .env or provided by the user.');
+            }
+            const cleanId = adAccountId.replace(/^act_/, '');
+            this.adAccountId = `act_${cleanId}`;
+
+            console.log('FacebookService Constructor: Received accessToken (first 30 chars):', this.accessToken.substring(0, 30) + '...');
+            console.log('FacebookService Constructor: Using adAccountId:', this.adAccountId);
+
+            // Initialize the global API instance. This is crucial.
+            this.api = initializeFacebookAPI(this.accessToken); 
+            
+            console.log('FacebookService Constructor: Initialized API instance. Type:', typeof this.api, 'Is instanceof FacebookAdsApi:', this.api instanceof FacebookAdsApi);
+            // Attempt to log the internal accessToken of the SDK instance (might vary by SDK version)
+            console.log('FacebookService Constructor: SDK internal accessToken (first 30 chars):', (this.api as any)?._accessToken?.substring(0, 30) + '...');
+            
+            // Create the AdAccount instance. It should now pick up the global API instance.
+            // If it still complains, try `new AdAccount(this.adAccountId, FacebookAdsApi.instance());`
+            this.adAccount = new AdAccount(this.adAccountId); 
+            console.log('FacebookService Constructor: AdAccount instance created. AdAccount ID:', (this.adAccount as any)?._data?.id);
+            // Check if AdAccount instance's API reference matches the global API instance
+            console.log('FacebookService Constructor: AdAccount instance API reference matches global API:', (this.adAccount as any)?._api === this.api);
+
         } catch (error: any) {
             console.error('Error in FacebookService constructor:', error);
             throw error;
         }
     }
 
+    /**
+     * Generates the Facebook OAuth login URL.
+     * @param redirectUri The URI Facebook will redirect to after authorization.
+     * @param scope An array of permissions your app needs.
+     * @returns The Facebook login URL.
+     */
+    static getLoginUrl(redirectUri: string, scope: string[]): string {
+        const baseUrl = 'https://www.facebook.com/v20.0/dialog/oauth'; // Use a specific API version
+        const params = new URLSearchParams({
+            client_id: FACEBOOK_CONFIG.appId!,
+            redirect_uri: redirectUri,
+            scope: scope.join(','),
+            response_type: 'code',
+            auth_type: 'rerequest', // To ask for permissions again if they were previously denied
+        });
+        return `${baseUrl}?${params.toString()}`;
+    }
+
+    /**
+     * Exchanges the authorization code for a user access token.
+     * @param code The authorization code received from Facebook.
+     * @param redirectUri The same redirect URI used in the login URL.
+     * @returns The user access token.
+     */
+    static async exchangeCodeForAccessToken(code: string, redirectUri: string): Promise<string> {
+        const tokenUrl = 'https://graph.facebook.com/v20.0/oauth/access_token'; // Use a specific API version
+        try {
+            const response = await axios.get(tokenUrl, {
+                params: {
+                    client_id: FACEBOOK_CONFIG.appId!,
+                    client_secret: FACEBOOK_CONFIG.appSecret!,
+                    redirect_uri: redirectUri,
+                    code: code,
+                },
+            });
+
+            if (response.data && response.data.access_token) {
+                return response.data.access_token;
+            } else {
+                throw new Error('Failed to get access token from Facebook.');
+            }
+        } catch (error: any) {
+            console.error('Error exchanging code for access token:', error.response?.data || error.message);
+            throw new Error(`Failed to exchange code for access token: ${error.response?.data?.error?.message || error.message}`);
+        }
+    }
+
+    /**
+     * Exchanges a short-lived user access token for a long-lived one.
+     * @param shortLivedToken The short-lived user access token.
+     * @returns The long-lived user access token.
+     */
+    static async getLongLivedAccessToken(shortLivedToken: string): Promise<string> {
+        const tokenUrl = 'https://graph.facebook.com/v20.0/oauth/access_token';
+        try {
+            const response = await axios.get(tokenUrl, {
+                params: {
+                    grant_type: 'fb_exchange_token',
+                    client_id: FACEBOOK_CONFIG.appId!,
+                    client_secret: FACEBOOK_CONFIG.appSecret!,
+                    fb_exchange_token: shortLivedToken,
+                },
+            });
+
+            if (response.data && response.data.access_token) {
+                return response.data.access_token;
+            } else {
+                throw new Error('Failed to get long-lived access token from Facebook.');
+            }
+        } catch (error: any) {
+            console.error('Error getting long-lived access token:', error.response?.data || error.message);
+            throw new Error(`Failed to get long-lived access token: ${error.response?.data?.error?.message || error.message}`);
+        }
+    }
+
     // Verify access token with retry
-    private async verifyAccessToken(retries = 3): Promise<void> {
+    // This method now uses the internal accessToken
+    async verifyAccessToken(retries = 3): Promise<void> {
         let lastError: any;
-        
+
         for (let i = 0; i < retries; i++) {
             try {
                 console.log(`Verifying access token (attempt ${i + 1}/${retries})...`);
-                
-                if (!FACEBOOK_CONFIG.accessToken) {
-                    throw new Error('Access token is missing');
+
+                if (!this.accessToken) {
+                    throw new Error('Access token is missing from service instance');
                 }
 
-                // First verify the token is valid by making a simple API call
+                // Use the global API instance for calls
                 const userResponse = await this.api.call(
                     'GET',
                     '/me',
@@ -165,11 +268,16 @@ export class FacebookService {
 
                 console.log('Permissions response:', permissionsResponse);
 
-                // Check for required permissions
                 const requiredPermissions = [
                     'ads_management',
                     'business_management',
-                    'pages_messaging'
+                    'pages_show_list',
+                    'pages_read_engagement',
+                    'pages_manage_ads',
+                    'pages_manage_metadata',
+                    'pages_read_user_content',
+                    'pages_manage_posts',
+                    'pages_manage_engagement',
                 ];
 
                 const grantedPermissions = permissionsResponse.data
@@ -178,7 +286,7 @@ export class FacebookService {
 
                 console.log('Granted permissions:', grantedPermissions);
 
-                const missingPermissions = requiredPermissions.filter(required => 
+                const missingPermissions = requiredPermissions.filter(required =>
                     !grantedPermissions.includes(required)
                 );
 
@@ -197,15 +305,11 @@ export class FacebookService {
                 });
                 
                 lastError = error;
-                
-                // If it's not the last attempt, wait before retrying
                 if (i < retries - 1) {
                     await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
                 }
             }
         }
-
-        // If we get here, all retries failed
         throw new Error(`Failed to verify access token after ${retries} attempts. Last error: ${lastError.message}`);
     }
 
@@ -224,13 +328,11 @@ export class FacebookService {
                 'owner'
             ]);
             const accountDetails = response as unknown as AdAccountDetails;
-            console.log('Ad Account Details:', accountDetails);
 
             // Get users with access
             const users = await this.adAccount.get([
                 'users'
             ]);
-            console.log('Users with Access:', users);
 
             // If we have a business ID, get assigned users
             let assignedUsers = null;
@@ -241,7 +343,6 @@ export class FacebookService {
                 ], {
                     business: business.id
                 });
-                console.log('Assigned Users:', assignedUsers);
             }
 
             return {
@@ -260,19 +361,15 @@ export class FacebookService {
         try {
             // Check if we can access the ad account
             const account = await this.adAccount.get(['id', 'name', 'account_status']);
-            console.log('Ad Account Access:', account);
 
-            // Check user permissions
-            const user = new User('me');
+            // Check user permissions - User constructor should pick up global API
+            const user = new User('me'); // Removed this.api
             const permissions = await user.getPermissions(
-                ['permission'],
-                { access_token: FACEBOOK_CONFIG.accessToken }
+                ['permission']
             );
-            console.log('User Permissions:', permissions);
 
             // Check if we can read campaigns
             const campaigns = await this.adAccount.getCampaigns(['id']);
-            console.log('Campaign Access:', campaigns);
 
             // Check app capabilities
             const appCapabilities = await this.verifyAppCapabilities();
@@ -293,21 +390,18 @@ export class FacebookService {
     // Verify page association
     async verifyPageAssociation() {
         try {
-            // Get pages associated with the ad account
-            const response = await this.adAccount.get([
-                'owned_pages',
-                'connected_pages'
-            ]);
-            const pages = response as unknown as AdAccountDetails;
-            console.log('Associated Pages:', pages);
-
-            if (!pages.owned_pages?.data?.length && !pages.connected_pages?.data?.length) {
-                throw new Error('No Facebook Pages associated with this ad account. Please connect a Page to your Business Manager and Ad Account.');
-            }
-
+            // Get the business account - Business constructor should pick up global API
+            const business = new Business(FACEBOOK_CONFIG.businessId); // Removed this.api
+            
+            // Get owned pages through the business account
+            const pages = await business.getOwnedPages(
+                ['id', 'name', 'category', 'access_token'],
+            );
+            
+            console.log('Owned pages:', pages);
             return pages;
         } catch (error) {
-            console.error('Page Association Verification Error:', error);
+            console.error('Error verifying page association:', error);
             throw error;
         }
     }
@@ -335,7 +429,8 @@ export class FacebookService {
             'Business', 'Company', 'Organization', 'Brand', 'Product/Service',
             'Local Business', 'Restaurant', 'Retail', 'Shopping & Retail',
             'E-commerce Website', 'Website', 'Blog', 'Media', 'Entertainment',
-            'Technology', 'Education', 'Non-profit Organization',
+            'Technology', 'Education',
+            'Non-profit Organization',
             'Community Organization', 'Public Figure', 'Artist', 'Musician',
             'Writer', 'Personal Blog'
         ];
@@ -351,9 +446,12 @@ export class FacebookService {
             const permissions = await this.verifyPermissions();
             console.log('Permissions verified:', permissions);
 
-            // Verify page association
+            // Verify page association - this is now required
             const pages = await this.verifyPageAssociation();
-            console.log('Page association verified:', pages);
+            console.log(pages)
+            if (!pages || pages.length === 0) {
+                throw new Error('No Facebook Pages associated with this ad account. Please create a page first using the /api/facebook/pages endpoint.');
+            }
 
             this.validateCampaignData(data);
             
@@ -366,14 +464,12 @@ export class FacebookService {
                 campaign_optimization_type: data.campaign_optimization_type || 'NONE'
             };
 
-            console.log('Creating campaign with params:', params);
 
             // Create campaign using the correct method
             const campaign = await (this.adAccount as any).createCampaign(
                 [],
                 params
             );
-            console.log('Campaign created successfully:', campaign);
             return campaign;
         } catch (error: any) {
             console.error('Error creating campaign:', {
@@ -402,7 +498,8 @@ export class FacebookService {
     // Get ad sets for a campaign
     async getAdSets(campaignId: string) {
         try {
-            const campaign = new Campaign(campaignId);
+            // Campaign constructor should pick up global API
+            const campaign = new Campaign(campaignId); // Removed this.api
             const adSets = await campaign.getAdSets(
                 ['id', 'name', 'status', 'daily_budget', 'lifetime_budget']
             );
@@ -420,7 +517,8 @@ export class FacebookService {
                 campaign_id: campaignId,
                 ...data,
             };
-            return await (AdSet as any).create(this.adAccount.id, params);
+            // AdSet.create should pick up global API
+            return await (AdSet as any).create(this.adAccount.id, params); // Removed { api: this.api }
         } catch (error) {
             console.error('Error creating ad set:', error);
             throw error;
@@ -430,7 +528,8 @@ export class FacebookService {
     // Get ads for an ad set
     async getAds(adSetId: string) {
         try {
-            const adSet = new AdSet(adSetId);
+            // AdSet constructor should pick up global API
+            const adSet = new AdSet(adSetId); // Removed this.api
             const ads = await adSet.getAds(
                 ['id', 'name', 'status', 'creative']
             );
@@ -448,7 +547,8 @@ export class FacebookService {
                 adset_id: adSetId,
                 ...data,
             };
-            return await (Ad as any).create(this.adAccount.id, params);
+            // Ad.create should pick up global API
+            return await (Ad as any).create(this.adAccount.id, params); // Removed { api: this.api }
         } catch (error) {
             console.error('Error creating ad:', error);
             throw error;
@@ -472,7 +572,7 @@ export class FacebookService {
     // Create a new Facebook Page
     async createPage(data: PageData): Promise<PageCreationResponse> {
         try {
-            // First verify access token
+            // First verify access token (already done by constructor, but good to re-verify permissions)
             await this.verifyAccessToken();
 
             // Then verify user permissions
@@ -490,7 +590,8 @@ export class FacebookService {
             });
 
             // Create the page using the business account
-            const response = await this.api.call(
+            // Ensure the access token is passed for this API call
+            const response = await this.api.call( // Use this.api
                 'POST',
                 `/${FACEBOOK_CONFIG.businessId}/owned_pages`,
                 {
@@ -503,13 +604,14 @@ export class FacebookService {
                     city: data.city,
                     state: data.state,
                     zip: data.zip,
-                    country: data.country
+                    country: data.country,
+                    access_token: this.accessToken // Explicitly pass the user's access token
                 }
             ) as {
                 id: string;
                 name: string;
                 category: string;
-                access_token: string;
+                access_token: string; // This is the page access token
                 tasks?: string[];
                 perms?: string[];
             };
@@ -532,7 +634,11 @@ export class FacebookService {
 
             console.log('Page created successfully:', page);
 
-            // Connect the page to the ad account
+            // Connect the page to the ad account (this part needs careful testing)
+            // This might be more about assigning user roles/permissions within Business Manager
+            // rather than a direct API "connection" for advertising.
+            // Consider if this step is truly necessary or if the page is implicitly available
+            // once created under the business and the user has correct permissions.
             await this.connectPageToAdAccount(page.id);
             
             return page;
@@ -548,20 +654,25 @@ export class FacebookService {
     }
 
     // Connect a page to the ad account
+    // This method's purpose might need re-evaluation based on Facebook's current API behavior
     private async connectPageToAdAccount(pageId: string) {
         try {
             // Ensure we're using the correct ad account ID format
             const adAccountId = this.adAccount.id;
-            const result = await this.api.call(
+            // This call seems to be assigning the app's user to the ad account within the business.
+            // This is a Business Manager operation, not directly linking a page for advertising.
+            // For advertising, you'd typically select the page when creating an ad creative.
+            const result = await this.api.call( // Use this.api
                 'POST',
                 `/${adAccountId}/assigned_users`,
                 {
-                    user: FACEBOOK_CONFIG.appId,
+                    user: FACEBOOK_CONFIG.appId, // This might be incorrect; typically it's a user ID
                     business: FACEBOOK_CONFIG.businessId,
-                    tasks: ['MANAGE', 'ADVERTISE']
+                    tasks: ['MANAGE', 'ADVERTISE'],
+                    access_token: this.accessToken // Ensure user's access token is used
                 }
             );
-            console.log('Page connected to ad account:', result);
+            console.log('Page connected to ad account (via assigned_users):', result);
             return result;
         } catch (error) {
             console.error('Error connecting page to ad account:', error);
@@ -572,15 +683,26 @@ export class FacebookService {
     // Get all pages associated with the user
     async getPages() {
         try {
-            const pages = await this.api.call(
-                'GET',
-                '/me/accounts',
-                {
-                    fields: ['id', 'name', 'category', 'tasks', 'access_token']
-                }
+            // First verify access token (already done by constructor, but good to re-verify permissions)
+            await this.verifyAccessToken();
+
+            // Get pages through the business account
+            const business = new Business(FACEBOOK_CONFIG.businessId, this.api); 
+            
+            // Get owned pages through the business account
+            const pages = await business.getOwnedPages(
+                ['id', 'name', 'category', 'access_token', 'tasks'],
             );
+
+            if (!pages || pages.length === 0) {
+                return [];
+            }
+
             return pages;
-        } catch (error) {
+        } catch (error: any) {
+            if (error.code === 2500) {
+                throw new Error('Invalid or expired access token. Please reconnect your Facebook account.');
+            }
             console.error('Error fetching pages:', error);
             throw error;
         }
@@ -589,10 +711,19 @@ export class FacebookService {
     // Update page information
     async updatePage(pageId: string, data: Partial<PageData>) {
         try {
-            const result = await this.api.call(
+            // When updating a page, you typically need the PAGE access token, not the user access token.
+            // You would need to retrieve the page's access token first (e.g., from your database where you stored it).
+            // For simplicity, this example still uses the user's access token, which might work for some fields
+            // if the user has sufficient permissions, but it's not the standard way for page management.
+            const pageAccessToken = this.accessToken; // Placeholder: Replace with actual page access token
+            
+            const result = await this.api.call( // Use this.api
                 'POST',
                 `/${pageId}`,
-                data
+                {
+                    ...data,
+                    access_token: pageAccessToken // Use the page access token
+                }
             );
             console.log('Page updated successfully:', result);
             return result;
@@ -605,50 +736,75 @@ export class FacebookService {
     // Get business information
     async getBusinessInfo() {
         try {
-            // Initialize API with access token
-            const api = FacebookAdsApi.init(FACEBOOK_CONFIG.accessToken!);
-            api.setDebug(true);
+            console.log('getBusinessInfo: Attempting to fetch /me data.');
+            console.log('getBusinessInfo: API instance being used:', this.api);
+            console.log('getBusinessInfo: API instance internal accessToken (first 30 chars):', (this.api as any)?._accessToken?.substring(0, 30) + '...');
 
-            // Get user information
-            const response = await api.call(
+            // --- TEMPORARY BYPASS FOR DEBUGGING ---
+            // If the SDK's .call() method is still failing, try a direct axios call
+            // to isolate if the SDK is the problem. REMOVE THIS IN PRODUCTION.
+            /*
+            console.warn('DEBUG: Attempting direct axios call to /me endpoint to bypass SDK.');
+            const directResponse = await axios.get('https://graph.facebook.com/v17.0/me', { // Use a specific API version
+                params: {
+                    fields: 'id,name,businesses,accounts',
+                    access_token: this.accessToken // Use the raw access token
+                }
+            });
+            console.log('DEBUG: Direct axios /me response:', directResponse.data);
+            return {
+                userInfo: directResponse.data,
+                businesses: directResponse.data.businesses,
+                adAccounts: directResponse.data.accounts,
+                currentBusiness: undefined // Cannot fetch specific business info with direct /me call
+            };
+            */
+            // --- END TEMPORARY BYPASS ---
+
+            // Get user information using the already initialized this.api instance
+            const response = await this.api.call(
                 'GET',
                 '/me',
                 {
                     fields: ['id', 'name', 'businesses', 'accounts']
                 }
             );
-            console.log('User Info:', response);
+            console.log('User Info (via SDK):', response);
 
             // Get businesses
-            const businesses = await api.call(
+            const businesses = await this.api.call(
                 'GET',
                 '/me/businesses',
                 {
                     fields: ['id', 'name', 'verification_status']
                 }
             );
-            console.log('Available Businesses:', businesses);
+            console.log('Available Businesses (via SDK):', businesses);
 
             // Get ad accounts
-            const adAccounts = await api.call(
+            const adAccounts = await this.api.call(
                 'GET',
                 '/me/adaccounts',
                 {
                     fields: ['id', 'name', 'account_status', 'business']
                 }
             );
-            console.log('Available Ad Accounts:', adAccounts);
+            console.log('Available Ad Accounts (via SDK):', adAccounts);
 
             // If we have a business ID in config, get its details
             if (FACEBOOK_CONFIG.businessId) {
-                const businessDetails = await api.call(
+                if (!FACEBOOK_CONFIG.businessId.match(/^\d+$/)) {
+                    console.warn(`FACEBOOK_CONFIG.businessId (${FACEBOOK_CONFIG.businessId}) seems malformed or is an Ad Account ID. Skipping business details fetch.`);
+                    return { userInfo: response, businesses, adAccounts };
+                }
+                const businessDetails = await this.api.call(
                     'GET',
                     `/${FACEBOOK_CONFIG.businessId}`,
                     {
                         fields: ['id', 'name', 'verification_status', 'owned_pages', 'owned_instagram_accounts']
                     }
                 );
-                console.log('Current Business Details:', businessDetails);
+                console.log('Current Business Details (via SDK):', businessDetails);
                 return {
                     userInfo: response,
                     businesses,
@@ -663,4 +819,4 @@ export class FacebookService {
             throw error;
         }
     }
-} 
+}
