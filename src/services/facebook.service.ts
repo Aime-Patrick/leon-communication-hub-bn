@@ -50,6 +50,27 @@ interface AdAccountDetails {
     connected_pages?: PageResponse;
 }
 
+export interface AdAccountResponse {
+    id: string;
+    name: string;
+    account_status: number;
+    business?: {
+        id: string;
+        name: string;
+    };
+    currency: string;
+    timezone_name: string;
+    owner?: {
+        id: string;
+        name: string;
+    };
+    account_id: string;
+}
+
+export interface AdAccountsResponse {
+    data: AdAccountResponse[];
+}
+
 export interface CampaignData {
     name: string;
     objective: CampaignObjective;
@@ -128,19 +149,14 @@ export class FacebookService {
             console.log('FacebookService Constructor: Received accessToken (first 30 chars):', this.accessToken.substring(0, 30) + '...');
             console.log('FacebookService Constructor: Using adAccountId:', this.adAccountId);
 
-            // Initialize the global API instance. This is crucial.
-            this.api = initializeFacebookAPI(this.accessToken); 
+            // Initialize the global API instance with the access token
+            this.api = new FacebookAdsApi(this.accessToken);
             
             console.log('FacebookService Constructor: Initialized API instance. Type:', typeof this.api, 'Is instanceof FacebookAdsApi:', this.api instanceof FacebookAdsApi);
-            // Attempt to log the internal accessToken of the SDK instance (might vary by SDK version)
-            console.log('FacebookService Constructor: SDK internal accessToken (first 30 chars):', (this.api as any)?._accessToken?.substring(0, 30) + '...');
             
-            // Create the AdAccount instance. It should now pick up the global API instance.
-            // If it still complains, try `new AdAccount(this.adAccountId, FacebookAdsApi.instance());`
-            this.adAccount = new AdAccount(this.adAccountId); 
+            // Create the AdAccount instance
+            this.adAccount = new AdAccount(this.adAccountId);
             console.log('FacebookService Constructor: AdAccount instance created. AdAccount ID:', (this.adAccount as any)?._data?.id);
-            // Check if AdAccount instance's API reference matches the global API instance
-            console.log('FacebookService Constructor: AdAccount instance API reference matches global API:', (this.adAccount as any)?._api === this.api);
 
         } catch (error: any) {
             console.error('Error in FacebookService constructor:', error);
@@ -155,7 +171,7 @@ export class FacebookService {
      * @returns The Facebook login URL.
      */
     static getLoginUrl(redirectUri: string, scope: string[]): string {
-        const baseUrl = 'https://www.facebook.com/v20.0/dialog/oauth'; // Use a specific API version
+        const baseUrl = 'https://www.facebook.com/v22.0/dialog/oauth'; // Use a specific API version
         const params = new URLSearchParams({
             client_id: FACEBOOK_CONFIG.appId!,
             redirect_uri: redirectUri,
@@ -173,7 +189,7 @@ export class FacebookService {
      * @returns The user access token.
      */
     static async exchangeCodeForAccessToken(code: string, redirectUri: string): Promise<string> {
-        const tokenUrl = 'https://graph.facebook.com/v20.0/oauth/access_token'; // Use a specific API version
+        const tokenUrl = 'https://graph.facebook.com/v22.0/oauth/access_token'; // Use a specific API version
         try {
             const response = await axios.get(tokenUrl, {
                 params: {
@@ -201,7 +217,7 @@ export class FacebookService {
      * @returns The long-lived user access token.
      */
     static async getLongLivedAccessToken(shortLivedToken: string): Promise<string> {
-        const tokenUrl = 'https://graph.facebook.com/v20.0/oauth/access_token';
+        const tokenUrl = 'https://graph.facebook.com/v22.0/oauth/access_token';
         try {
             const response = await axios.get(tokenUrl, {
                 params: {
@@ -736,32 +752,11 @@ export class FacebookService {
     // Get business information
     async getBusinessInfo() {
         try {
-            console.log('getBusinessInfo: Attempting to fetch /me data.');
-            console.log('getBusinessInfo: API instance being used:', this.api);
-            console.log('getBusinessInfo: API instance internal accessToken (first 30 chars):', (this.api as any)?._accessToken?.substring(0, 30) + '...');
+            console.log('=== getBusinessInfo: Starting API calls ===');
+            console.log('getBusinessInfo: Using access token (first 30 chars):', this.accessToken.substring(0, 30) + '...');
 
-            // --- TEMPORARY BYPASS FOR DEBUGGING ---
-            // If the SDK's .call() method is still failing, try a direct axios call
-            // to isolate if the SDK is the problem. REMOVE THIS IN PRODUCTION.
-            /*
-            console.warn('DEBUG: Attempting direct axios call to /me endpoint to bypass SDK.');
-            const directResponse = await axios.get('https://graph.facebook.com/v17.0/me', { // Use a specific API version
-                params: {
-                    fields: 'id,name,businesses,accounts',
-                    access_token: this.accessToken // Use the raw access token
-                }
-            });
-            console.log('DEBUG: Direct axios /me response:', directResponse.data);
-            return {
-                userInfo: directResponse.data,
-                businesses: directResponse.data.businesses,
-                adAccounts: directResponse.data.accounts,
-                currentBusiness: undefined // Cannot fetch specific business info with direct /me call
-            };
-            */
-            // --- END TEMPORARY BYPASS ---
-
-            // Get user information using the already initialized this.api instance
+            // Get user information
+            console.log('getBusinessInfo: Fetching /me data...');
             const response = await this.api.call(
                 'GET',
                 '/me',
@@ -769,9 +764,10 @@ export class FacebookService {
                     fields: ['id', 'name', 'businesses', 'accounts']
                 }
             );
-            console.log('User Info (via SDK):', response);
+            console.log('getBusinessInfo: User Info Response:', JSON.stringify(response, null, 2));
 
             // Get businesses
+            console.log('getBusinessInfo: Fetching /me/businesses data...');
             const businesses = await this.api.call(
                 'GET',
                 '/me/businesses',
@@ -779,24 +775,55 @@ export class FacebookService {
                     fields: ['id', 'name', 'verification_status']
                 }
             );
-            console.log('Available Businesses (via SDK):', businesses);
+            console.log('getBusinessInfo: Businesses Response:', JSON.stringify(businesses, null, 2));
 
             // Get ad accounts
+            console.log('getBusinessInfo: Fetching /me/adaccounts data...');
             const adAccounts = await this.api.call(
                 'GET',
                 '/me/adaccounts',
                 {
-                    fields: ['id', 'name', 'account_status', 'business']
+                    fields: [
+                        'id',
+                        'name',
+                        'account_status',
+                        'business',
+                        'currency',
+                        'timezone_name',
+                        'owner',
+                        'account_id'
+                    ]
                 }
-            );
-            console.log('Available Ad Accounts (via SDK):', adAccounts);
+            ) as AdAccountsResponse;
+            console.log('getBusinessInfo: Raw Ad Accounts Response:', JSON.stringify(adAccounts, null, 2));
+
+            // Process ad accounts
+            const processedAdAccounts = {
+                data: Array.isArray(adAccounts) ? adAccounts : adAccounts?.data || []
+            };
+            console.log('getBusinessInfo: Processed Ad Accounts:', JSON.stringify(processedAdAccounts, null, 2));
+
+            // Log account statuses
+            if (processedAdAccounts.data.length > 0) {
+                console.log('getBusinessInfo: Ad Account Statuses:');
+                processedAdAccounts.data.forEach(account => {
+                    console.log(`- Account ${account.name} (${account.id}): Status ${account.account_status}`);
+                });
+            } else {
+                console.warn('getBusinessInfo: No ad accounts found in the response');
+            }
 
             // If we have a business ID in config, get its details
             if (FACEBOOK_CONFIG.businessId) {
                 if (!FACEBOOK_CONFIG.businessId.match(/^\d+$/)) {
-                    console.warn(`FACEBOOK_CONFIG.businessId (${FACEBOOK_CONFIG.businessId}) seems malformed or is an Ad Account ID. Skipping business details fetch.`);
-                    return { userInfo: response, businesses, adAccounts };
+                    console.warn(`getBusinessInfo: FACEBOOK_CONFIG.businessId (${FACEBOOK_CONFIG.businessId}) seems malformed or is an Ad Account ID. Skipping business details fetch.`);
+                    return { 
+                        userInfo: response, 
+                        businesses, 
+                        adAccounts: processedAdAccounts 
+                    };
                 }
+                console.log('getBusinessInfo: Fetching business details for ID:', FACEBOOK_CONFIG.businessId);
                 const businessDetails = await this.api.call(
                     'GET',
                     `/${FACEBOOK_CONFIG.businessId}`,
@@ -804,18 +831,29 @@ export class FacebookService {
                         fields: ['id', 'name', 'verification_status', 'owned_pages', 'owned_instagram_accounts']
                     }
                 );
-                console.log('Current Business Details (via SDK):', businessDetails);
+                console.log('getBusinessInfo: Business Details Response:', JSON.stringify(businessDetails, null, 2));
                 return {
                     userInfo: response,
                     businesses,
-                    adAccounts,
+                    adAccounts: processedAdAccounts,
                     currentBusiness: businessDetails
                 };
             }
 
-            return { userInfo: response, businesses, adAccounts };
+            console.log('=== getBusinessInfo: API calls completed successfully ===');
+            return { 
+                userInfo: response, 
+                businesses, 
+                adAccounts: processedAdAccounts 
+            };
         } catch (error) {
-            console.error('Error fetching business information:', error);
+            console.error('getBusinessInfo: Error fetching business information:', error);
+            console.error('getBusinessInfo: Error details:', {
+                message: error.message,
+                code: error.code,
+                subcode: error.subcode,
+                error_user_msg: error.error_user_msg
+            });
             throw error;
         }
     }

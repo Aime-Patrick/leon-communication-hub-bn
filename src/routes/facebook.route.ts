@@ -1,5 +1,5 @@
 import express from 'express';
-import { FacebookService, CampaignData, PageData } from '../services/facebook.service';
+import { FacebookService, CampaignData, PageData, AdAccountResponse } from '../services/facebook.service';
 import { FACEBOOK_CONFIG } from '../config/facebook.config';
 import { User, IUser } from '../models/User';
 import crypto from 'crypto';
@@ -49,6 +49,31 @@ router.get('/auth/login', protect, async (req:AuthRequest, res) => {
         return;
     }
 
+    // Generate a new state for this OAuth attempt
+    const state = crypto.randomBytes(16).toString('hex');
+    
+    // Set session data
+    req.session.oauthState = state;
+    req.session.facebookConnectUserId = user._id.toString();
+    req.session.userId = user._id.toString();
+
+    // Save session before proceeding
+    await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+            if (err) {
+                console.error('Error saving session in login route:', err);
+                reject(err);
+                return;
+            }
+            console.log('Session saved in login route:', {
+                sessionId: req.sessionID,
+                state: req.session.oauthState,
+                userId: req.session.userId
+            });
+            resolve();
+        });
+    });
+
     const permissions = [
         'ads_management', 'business_management', 'pages_show_list',
         'pages_read_engagement', 'pages_manage_ads', 'pages_manage_metadata',
@@ -56,7 +81,7 @@ router.get('/auth/login', protect, async (req:AuthRequest, res) => {
         'email', 'public_profile',
     ];
 
-    const loginUrl = FacebookService.getLoginUrl(FACEBOOK_CONFIG.redirectUri!, permissions) + `&state=${req.session.oauthState}`;
+    const loginUrl = FacebookService.getLoginUrl(FACEBOOK_CONFIG.redirectUri!, permissions) + `&state=${state}`;
     res.json(loginUrl);
 });
 
@@ -69,25 +94,8 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
     try {
         const { code, state, error, error_description } = req.query;
 
-        // Reload session to ensure we have the latest data
-        await new Promise<void>((resolve, reject) => {
-            req.session.reload((err) => {
-                if (err) {
-                    console.error('Error reloading session in callback:', err);
-                    reject(err);
-                    return;
-                }
-                console.log('Session reloaded in callback:', {
-                    sessionId: req.sessionID,
-                    state: req.session.oauthState,
-                    userId: req.session.userId
-                });
-                resolve();
-            });
-        });
-
-        // Log session state
-        console.log('Callback session state:', {
+        // Log initial session state
+        console.log('Callback initial session state:', {
             sessionId: req.sessionID,
             state: req.session.oauthState,
             userId: req.session.userId,
@@ -95,12 +103,17 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
         });
 
         // Verify state parameter
-        if (!state || state !== req.session.oauthState) {
-            console.error('CSRF attack detected:', {
+        if (!state || !req.session.oauthState || state !== req.session.oauthState) {
+            console.error('CSRF attack detected or session expired:', {
                 sessionState: req.session.oauthState,
-                queryState: state
+                queryState: state,
+                sessionId: req.sessionID
             });
-            res.status(401).json({ error: 'Invalid state parameter' });
+            res.status(401).json({ 
+                error: 'Invalid state parameter',
+                message: 'Session may have expired. Please try connecting your Facebook account again.'
+            });
+            return;
         }
 
         // Handle errors returned by Facebook
@@ -123,7 +136,7 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
             return;
         }
 
-        // Load the user based on the stored ID from the session (from when login was initiated)
+        // Load the user based on the stored ID from the session
         const user = await User.findById(req.session.facebookConnectUserId);
         if (!user) {
             console.error('GET /auth/callback: User not found in DB for stored ID:', req.session.facebookConnectUserId);
@@ -148,50 +161,101 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
             // Initialize a temporary FacebookService to fetch user's ad accounts/businesses
             const tempFacebookService = new FacebookService(longLivedAccessToken, FACEBOOK_CONFIG.adAccountId ?? '');
                                                                                                                    
-            let primaryAdAccountId: string | undefined;
-            let primaryBusinessId: string | undefined;
+            let adAccountId: string | undefined;
 
+            // Get user ad accounts and businesses
             try {
-                console.log('GET /auth/callback: Attempting to fetch user ad accounts and businesses with temp service.');
-                const userAdAccountsAndBusinesses = await tempFacebookService.getBusinessInfo();
+                console.log('GET /auth/callback: Fetching business info...');
+                const userAdAccountsAndBusinesses:any = await tempFacebookService.getBusinessInfo();
+                console.log('GET /auth/callback: Raw Facebook API response:', JSON.stringify(userAdAccountsAndBusinesses, null, 2));
                 
-                const adAccounts = userAdAccountsAndBusinesses.adAccounts as { data: Array<{ id: string }> } | undefined;
-                if (adAccounts && adAccounts.data && adAccounts.data.length > 0) {
-                    primaryAdAccountId = adAccounts.data[0].id;
-                    console.log('GET /auth/callback: Found primary Ad Account:', primaryAdAccountId);
+                // Handle ad accounts
+                const adAccounts = userAdAccountsAndBusinesses.adAccounts?.data || [];
+                console.log('GET /auth/callback: Ad Accounts data:', JSON.stringify(adAccounts, null, 2));
+
+                if (adAccounts.length === 0) {
+                    console.warn('GET /auth/callback: No ad accounts found in the response');
+                    // Check user permissions
+                    const permissions = await tempFacebookService.verifyPermissions();
+                    console.log('GET /auth/callback: User permissions:', permissions);
                 } else {
-                    console.warn('GET /auth/callback: No ad accounts found for the authenticated Facebook user.');
+                    // Log all available ad accounts and their statuses
+                    console.log('GET /auth/callback: Available Ad Accounts:');
+                    adAccounts.forEach(account => {
+                        console.log(`- ${account.name} (${account.id}): Status ${account.account_status}`);
+                    });
+
+                    // Find the first active ad account (account_status === 1)
+                    const activeAdAccount = adAccounts.find(account => account.account_status === 1);
+                    console.log('GET /auth/callback: Active ad account found:', activeAdAccount);
+
+                    if (activeAdAccount) {
+                        // Use the active ad account
+                        adAccountId = activeAdAccount.id;
+                        console.log('GET /auth/callback: Using active ad account:', adAccountId);
+                    } else {
+                        // Fallback to first available account
+                        adAccountId = adAccounts[0].id;
+                        console.log('GET /auth/callback: No active ad account found, using first available:', adAccountId);
+                    }
                 }
 
-                const businesses = userAdAccountsAndBusinesses.businesses as { data: Array<{ id: string }> } | undefined;
-                if (businesses && businesses.data && businesses.data.length > 0) {
-                    primaryBusinessId = businesses.data[0].id;
-                    console.log('GET /auth/callback: Found primary Business ID:', primaryBusinessId);
+                // Handle businesses
+                const businesses = userAdAccountsAndBusinesses.businesses?.data || [];
+                console.log('GET /auth/callback: Businesses data:', JSON.stringify(businesses, null, 2));
+
+                if (businesses.length === 0) {
+                    console.warn('GET /auth/callback: No businesses found in the response');
                 } else {
-                    console.warn('GET /auth/callback: No business accounts found for the authenticated Facebook user.');
+                    console.log('GET /auth/callback: Available Businesses:');
+                    businesses.forEach(business => {
+                        console.log(`- ${business.name} (${business.id})`);
+                    });
                 }
-            } catch (infoError) {
-                console.error('GET /auth/callback: Error fetching user ad accounts/businesses after OAuth:', infoError);
+
+                // Log user info
+                console.log('GET /auth/callback: User info:', JSON.stringify(userAdAccountsAndBusinesses.userInfo, null, 2));
+
+            } catch (error) {
+                console.error('GET /auth/callback: Error fetching business info:', error);
+                console.error('GET /auth/callback: Error details:', {
+                    message: error.message,
+                    code: error.code,
+                    subcode: error.subcode,
+                    error_user_msg: error.error_user_msg
+                });
+                throw error; // Re-throw to be caught by outer try-catch
             }
 
             // Save the tokens and IDs to the authenticated user's database record
             user.facebookAccessToken = longLivedAccessToken;
             user.facebookAccessTokenExpires = expirationDate;
-            user.facebookAdAccountId = primaryAdAccountId;
-            user.facebookBusinessId = primaryBusinessId;
+            user.facebookAdAccountId = adAccountId;
 
             await user.save();
             console.log('GET /auth/callback: Facebook access token and IDs saved to user database.');
             console.log('GET /auth/callback: Token saved to DB (first 30 chars):', user.facebookAccessToken?.substring(0, 30) + '...');
             console.log('GET /auth/callback: Ad Account ID saved to DB:', user.facebookAdAccountId);
 
+            // Clear the OAuth state from session after successful connection
+            req.session.oauthState = undefined;
+            req.session.facebookConnectUserId = undefined;
+            await new Promise<void>((resolve, reject) => {
+                req.session.save((err) => {
+                    if (err) {
+                        console.error('Error saving session after successful connection:', err);
+                        reject(err);
+                        return;
+                    }
+                    resolve();
+                });
+            });
 
             res.status(200).json({
                 status: 'success',
                 message: 'Facebook account connected successfully!',
                 fbData: {
-                    adAccountId: primaryAdAccountId,
-                    businessId: primaryBusinessId,
+                    adAccountId: adAccountId,
                     accessToken: longLivedAccessToken,
                     expiresAt: expirationDate
                 }
