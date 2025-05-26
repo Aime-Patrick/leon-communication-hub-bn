@@ -135,28 +135,30 @@ export class FacebookService {
     private accessToken: string;
     private adAccountId: string;
 
-    constructor(accessToken: string, adAccountId: string) {
+    constructor(accessToken: string, adAccountId?: string) {
         try {
             this.accessToken = accessToken;
             
-            // Fix the adAccountId: Ensure it's not empty and formatted correctly
-            if (!adAccountId || adAccountId.trim() === '') {
-                throw new Error('Ad Account ID cannot be empty. Please ensure FACEBOOK_AD_ACCOUNT_ID is set in your .env or provided by the user.');
-            }
-            const cleanId = adAccountId.replace(/^act_/, '');
-            this.adAccountId = `act_${cleanId}`;
-
-            console.log('FacebookService Constructor: Received accessToken (first 30 chars):', this.accessToken.substring(0, 30) + '...');
-            console.log('FacebookService Constructor: Using adAccountId:', this.adAccountId);
-
             // Initialize the global API instance with the access token
             this.api = new FacebookAdsApi(this.accessToken);
+            console.log('FacebookService Constructor: Initialized API instance with access token');
             
-            console.log('FacebookService Constructor: Initialized API instance. Type:', typeof this.api, 'Is instanceof FacebookAdsApi:', this.api instanceof FacebookAdsApi);
-            
-            // Create the AdAccount instance
-            this.adAccount = new AdAccount(this.adAccountId);
-            console.log('FacebookService Constructor: AdAccount instance created. AdAccount ID:', (this.adAccount as any)?._data?.id);
+            // Only set up adAccount if adAccountId is provided
+            if (adAccountId) {
+                // Fix the adAccountId: Ensure it's not empty and formatted correctly
+                if (adAccountId.trim() === '') {
+                    throw new Error('Ad Account ID cannot be empty. Please ensure FACEBOOK_AD_ACCOUNT_ID is set in your .env or provided by the user.');
+                }
+                const cleanId = adAccountId.replace(/^act_/, '');
+                this.adAccountId = `act_${cleanId}`;
+                console.log('FacebookService Constructor: Using adAccountId:', this.adAccountId);
+                
+                // Create the AdAccount instance
+                this.adAccount = new AdAccount(this.adAccountId);
+                console.log('FacebookService Constructor: AdAccount instance created. AdAccount ID:', (this.adAccount as any)?._data?.id);
+            } else {
+                console.log('FacebookService Constructor: No adAccountId provided, skipping AdAccount initialization');
+            }
 
         } catch (error: any) {
             console.error('Error in FacebookService constructor:', error);
@@ -755,9 +757,12 @@ export class FacebookService {
             console.log('=== getBusinessInfo: Starting API calls ===');
             console.log('getBusinessInfo: Using access token (first 30 chars):', this.accessToken.substring(0, 30) + '...');
 
+            // Initialize the API with the access token
+            const api = new FacebookAdsApi(this.accessToken);
+
             // Get user information
             console.log('getBusinessInfo: Fetching /me data...');
-            const response = await this.api.call(
+            const response = await api.call(
                 'GET',
                 '/me',
                 {
@@ -768,7 +773,7 @@ export class FacebookService {
 
             // Get businesses
             console.log('getBusinessInfo: Fetching /me/businesses data...');
-            const businesses = await this.api.call(
+            const businesses = await api.call(
                 'GET',
                 '/me/businesses',
                 {
@@ -779,7 +784,7 @@ export class FacebookService {
 
             // Get ad accounts
             console.log('getBusinessInfo: Fetching /me/adaccounts data...');
-            const adAccounts = await this.api.call(
+            const adAccounts = await api.call(
                 'GET',
                 '/me/adaccounts',
                 {
@@ -824,7 +829,7 @@ export class FacebookService {
                     };
                 }
                 console.log('getBusinessInfo: Fetching business details for ID:', FACEBOOK_CONFIG.businessId);
-                const businessDetails = await this.api.call(
+                const businessDetails = await api.call(
                     'GET',
                     `/${FACEBOOK_CONFIG.businessId}`,
                     {

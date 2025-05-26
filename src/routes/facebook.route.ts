@@ -158,13 +158,25 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
             const expiresInSeconds = 60 * 24 * 60 * 60; // 60 days
             const expirationDate = new Date(Date.now() + expiresInSeconds * 1000);
 
-            // Initialize a temporary FacebookService to fetch user's ad accounts/businesses
-            const tempFacebookService = new FacebookService(longLivedAccessToken, FACEBOOK_CONFIG.adAccountId ?? '');
-                                                                                                                   
-            let adAccountId: string | undefined;
-
-            // Get user ad accounts and businesses
+            // Save the token first
+            console.log('GET /auth/callback: Saving token to user record...');
+            user.facebookAccessToken = longLivedAccessToken;
+            user.facebookAccessTokenExpires = expirationDate;
+            
             try {
+                await user.save();
+                console.log('GET /auth/callback: Successfully saved token to user record');
+            } catch (saveError) {
+                console.error('GET /auth/callback: Error saving token to user record:', saveError);
+                throw saveError;
+            }
+
+            // Now try to get business info
+            let adAccountId: string | undefined;
+            try {
+                // Initialize a temporary FacebookService to fetch user's ad accounts/businesses
+                const tempFacebookService = new FacebookService(longLivedAccessToken, FACEBOOK_CONFIG.adAccountId ?? '');
+                                                                                                                       
                 console.log('GET /auth/callback: Fetching business info...');
                 const userAdAccountsAndBusinesses:any = await tempFacebookService.getBusinessInfo();
                 console.log('GET /auth/callback: Raw Facebook API response:', JSON.stringify(userAdAccountsAndBusinesses, null, 2));
@@ -198,6 +210,11 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
                         adAccountId = adAccounts[0].id;
                         console.log('GET /auth/callback: No active ad account found, using first available:', adAccountId);
                     }
+
+                    // Save the ad account ID
+                    user.facebookAdAccountId = adAccountId;
+                    await user.save();
+                    console.log('GET /auth/callback: Successfully saved ad account ID to user record');
                 }
 
                 // Handle businesses
@@ -224,18 +241,8 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
                     subcode: error.subcode,
                     error_user_msg: error.error_user_msg
                 });
-                throw error; // Re-throw to be caught by outer try-catch
+                // Don't throw here, just log the error and continue
             }
-
-            // Save the tokens and IDs to the authenticated user's database record
-            user.facebookAccessToken = longLivedAccessToken;
-            user.facebookAccessTokenExpires = expirationDate;
-            user.facebookAdAccountId = adAccountId;
-
-            await user.save();
-            console.log('GET /auth/callback: Facebook access token and IDs saved to user database.');
-            console.log('GET /auth/callback: Token saved to DB (first 30 chars):', user.facebookAccessToken?.substring(0, 30) + '...');
-            console.log('GET /auth/callback: Ad Account ID saved to DB:', user.facebookAdAccountId);
 
             // Clear the OAuth state from session after successful connection
             req.session.oauthState = undefined;
@@ -274,39 +281,39 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
 // and it assumes req.user is populated by your main application's 'protect' middleware.
 
 router.use(protect);
-router.use(async (req, res, next) => {
-    console.log('--- Facebook Router Protected Middleware ---');
-    const user: IUser = req.user as IUser; // req.user should be populated by app.use(protect
-    console.log('user', user)
-    if (!user) {
-        console.error('Facebook Router Protected Middleware: User not authenticated (req.user is null/undefined).');
-         res.status(401).json({
-            error: 'Authentication Required',
-            message: 'User not authenticated in your application. Please log in first.'
-        });
-        return;
-    }
+// router.use(async (req, res, next) => {
+//     console.log('--- Facebook Router Protected Middleware ---');
+//     const user: IUser = req.user as IUser; // req.user should be populated by app.use(protect
+//     console.log('user', user)
+//     if (!user) {
+//         console.error('Facebook Router Protected Middleware: User not authenticated (req.user is null/undefined).');
+//          res.status(401).json({
+//             error: 'Authentication Required',
+//             message: 'User not authenticated in your application. Please log in first.'
+//         });
+//         return;
+//     }
 
-    const facebookAccessToken = user.facebookAccessToken;
-    const facebookAdAccountId = user.facebookAdAccountId;
+//     const facebookAccessToken = user.facebookAccessToken;
+//     const facebookAdAccountId = user.facebookAdAccountId;
 
-    console.log('Facebook Router Protected Middleware: User email:', user.email);
-    console.log('Facebook Router Protected Middleware: Token from DB (first 30 chars):', facebookAccessToken?.substring(0, 30) + '...');
-    console.log('Facebook Router Protected Middleware: Ad Account ID from DB:', facebookAdAccountId);
+//     console.log('Facebook Router Protected Middleware: User email:', user.email);
+//     console.log('Facebook Router Protected Middleware: Token from DB (first 30 chars):', facebookAccessToken?.substring(0, 30) + '...');
+//     console.log('Facebook Router Protected Middleware: Ad Account ID from DB:', facebookAdAccountId);
 
-    if (!facebookAccessToken || !facebookAdAccountId) {
-        console.error('Facebook Router Protected Middleware: Missing Facebook access token or Ad Account ID in DB.');
-         res.status(401).json({
-            error: 'Facebook Integration Required',
-            message: 'Your Facebook account is not connected or an Ad Account is not selected. Please visit /api/facebook/auth/login to connect.'
-        });
-        return;
-    }
+//     if (!facebookAccessToken || !facebookAdAccountId) {
+//         console.error('Facebook Router Protected Middleware: Missing Facebook access token or Ad Account ID in DB.');
+//          res.status(401).json({
+//             error: 'Facebook Integration Required',
+//             message: 'Your Facebook account is not connected or an Ad Account is not selected. Please visit /api/facebook/auth/login to connect.'
+//         });
+//         return;
+//     }
 
-    (req as any).facebookService = new FacebookService(facebookAccessToken, facebookAdAccountId);
-    console.log('Facebook Router Protected Middleware: FacebookService initialized successfully.');
-    next();
-});
+//     (req as any).facebookService = new FacebookService(facebookAccessToken, facebookAdAccountId);
+//     console.log('Facebook Router Protected Middleware: FacebookService initialized successfully.');
+//     next();
+// });
 
 
 // --- Existing Marketing API Endpoints (now use the middleware for authentication) ---
@@ -408,9 +415,19 @@ router.get('/insights', async (req, res) => {
     }
 });
 
-router.get('/business-info', async (req, res) => {
+router.get('/business-info', async (req: AuthRequest, res) => {
     try {
-        const facebookService: FacebookService = (req as any).facebookService;
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        // Create FacebookService instance with just the access token
+        const facebookService = new FacebookService(user.facebookAccessToken);
         const businessInfo = await facebookService.getBusinessInfo();
         res.json(businessInfo);
     } catch (error: any) {
