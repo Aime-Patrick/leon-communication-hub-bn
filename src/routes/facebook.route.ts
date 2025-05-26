@@ -5,6 +5,10 @@ import { User, IUser } from '../models/User';
 import crypto from 'crypto';
 import { AuthRequest, protect } from '../middleware/auth';
 import { Response } from 'express';
+import multer from 'multer';
+import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+import fs from 'fs';
 
 const router = express.Router();
 
@@ -30,6 +34,36 @@ const sendErrorResponse = (res: express.Response, statusCode: number, error: any
 
 // Add a Set to track processed callbacks
 const processedCallbacks = new Set<string>();
+
+// Configure multer for video uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const uploadDir = path.join(__dirname, '../../uploads');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueId = uuidv4();
+        cb(null, `${uniqueId}-${file.originalname}`);
+    }
+});
+
+const upload = multer({
+    storage,
+    limits: {
+        fileSize: 1024 * 1024 * 1024, // 1GB limit
+    },
+    fileFilter: (req, file, cb) => {
+        // Accept only video files
+        if (file.mimetype.startsWith('video/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only video files are allowed'));
+        }
+    }
+});
 
 // --- OAuth Authentication Endpoints --- 
 
@@ -826,6 +860,166 @@ router.get('/posts/:postId/insights', protect, async (req: AuthRequest, res) => 
         res.json(insights);
     } catch (error: any) {
         sendErrorResponse(res, 500, error, 'Failed to fetch post insights');
+    }
+});
+
+// Upload video to a page
+router.post('/pages/:pageId/videos', protect, upload.single('video'), async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        if (!req.file) {
+            res.status(400).json({
+                error: 'No Video File',
+                message: 'Please provide a video file to upload.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { pageId } = req.params;
+        const { title, description, message } = req.body;
+
+        // Get page access token
+        const pageInfo = await facebookService.getPageInfo(pageId, user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        // Read the file
+        const fileBuffer = fs.readFileSync(req.file.path);
+        const fileSize = fs.statSync(req.file.path).size;
+
+        // Create post with video
+        const post = await facebookService.createPost(pageId, pageInfo.access_token, {
+            message,
+            video_file: {
+                name: req.file.originalname,
+                buffer: fileBuffer,
+                size: fileSize
+            },
+            video_title: title,
+            video_description: description
+        });
+
+        // Clean up the uploaded file
+        fs.unlinkSync(req.file.path);
+
+        res.json(post);
+    } catch (error: any) {
+        // Clean up the uploaded file in case of error
+        if (req.file) {
+            fs.unlinkSync(req.file.path);
+        }
+        sendErrorResponse(res, 500, error, 'Failed to upload video');
+    }
+});
+
+// Upload video in chunks
+router.post('/pages/:pageId/videos/chunked', protect, async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { pageId } = req.params;
+        const { fileName, fileSize, chunk, chunkIndex, totalChunks, sessionId } = req.body;
+
+        if (!fileName || !fileSize || !chunk || chunkIndex === undefined || !totalChunks) {
+            res.status(400).json({
+                error: 'Missing Parameters',
+                message: 'Please provide all required parameters for chunked upload.'
+            });
+            return;
+        }
+
+        // Get page access token
+        const pageInfo = await facebookService.getPageInfo(pageId, user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        let uploadSession;
+        if (chunkIndex === 0) {
+            // Start new upload session for first chunk
+            uploadSession = await facebookService.startVideoUpload(fileName, fileSize);
+        } else if (sessionId) {
+            // Get upload status for resuming
+            const status = await facebookService.getUploadStatus(sessionId);
+            uploadSession = { id: status.id };
+        } else {
+            throw new Error('Session ID required for chunked upload');
+        }
+
+        // Upload the chunk
+        const uploadResponse = await facebookService.uploadVideoChunk(
+            uploadSession.id,
+            Buffer.from(chunk, 'base64'),
+            chunkIndex * chunk.length
+        );
+
+        // If this is the last chunk, publish the video
+        if (chunkIndex === totalChunks - 1) {
+            const { title, description, message } = req.body;
+            const post = await facebookService.createPost(pageId, pageInfo.access_token, {
+                message,
+                video_file: {
+                    name: fileName,
+                    buffer: Buffer.from(chunk, 'base64'),
+                    size: fileSize
+                },
+                video_title: title,
+                video_description: description
+            });
+            res.json({ ...post, sessionId: uploadSession.id });
+        } else {
+            res.json({ sessionId: uploadSession.id });
+        }
+    } catch (error: any) {
+        sendErrorResponse(res, 500, error, 'Failed to upload video chunk');
+    }
+});
+
+// Get upload status
+router.get('/videos/upload/:sessionId/status', protect, async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { sessionId } = req.params;
+
+        const status = await facebookService.getUploadStatus(sessionId);
+        res.json(status);
+    } catch (error: any) {
+        sendErrorResponse(res, 500, error, 'Failed to get upload status');
     }
 });
 

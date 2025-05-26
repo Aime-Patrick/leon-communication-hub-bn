@@ -129,6 +129,20 @@ export interface PageCreationResponse {
     perms?: string[];
 }
 
+// Add these interfaces at the top with other interfaces
+interface UploadSession {
+    id: string;
+}
+
+interface UploadResponse {
+    h: string;
+}
+
+interface UploadStatus {
+    id: string;
+    file_offset: number;
+}
+
 export class FacebookService {
     private api: FacebookAdsApi;
     private adAccount: AdAccount;
@@ -808,7 +822,7 @@ export class FacebookService {
                         'fan_count',
                         'verification_status',
                         'link',
-                        'access_token'  // Add access_token to the fields
+                        'access_token'
                     ].join(','),
                     access_token: pageAccessToken
                 }
@@ -1033,18 +1047,64 @@ export class FacebookService {
         video_description?: string;
         image_url?: string;
         scheduled_publish_time?: number;
+        video_file?: {
+            name: string;
+            buffer: Buffer;
+            size: number;
+        };
     }) {
         try {
             console.log('Creating post with data:', {
                 pageId,
                 hasMessage: !!content.message,
                 hasLink: !!content.link,
-                hasVideo: !!content.video_url,
+                hasVideo: !!content.video_url || !!content.video_file,
                 hasImage: !!content.image_url,
                 scheduledTime: content.scheduled_publish_time
             });
 
-            // If we have a video, we need to upload it first
+            // If we have a video file, upload it first
+            if (content.video_file) {
+                // Start upload session
+                const uploadSession = await this.startVideoUpload(
+                    content.video_file.name,
+                    content.video_file.size
+                );
+
+                // Upload the video
+                const uploadResponse = await this.uploadVideoChunk(
+                    uploadSession.id,
+                    content.video_file.buffer
+                );
+
+                // Publish the video
+                const videoResponse = await this.publishVideo(
+                    pageId,
+                    pageAccessToken,
+                    uploadResponse.h,
+                    content.video_title,
+                    content.video_description
+                );
+
+                // If we have a message, create a post with the video
+                if (content.message) {
+                    const postUrl = `https://graph.facebook.com/v22.0/${pageId}/feed`;
+                    const response = await axios.post(postUrl, null, {
+                        params: {
+                            message: content.message,
+                            video_id: videoResponse.id,
+                            access_token: pageAccessToken
+                        }
+                    });
+
+                    console.log('Post with video response:', response.data);
+                    return response.data;
+                }
+
+                return videoResponse;
+            }
+
+            // If we have a video URL, use the existing logic
             if (content.video_url) {
                 // First, create a video container
                 const videoContainerUrl = `https://graph.facebook.com/v22.0/${pageId}/videos`;
@@ -1192,7 +1252,11 @@ export class FacebookService {
     // Reply to a comment
     async replyToComment(commentId: string, pageAccessToken: string, message: string) {
         try {
-            const replyUrl = `https://graph.facebook.com/v22.0/${commentId}/comments`;
+            // Extract the post ID from the comment ID
+            const postId = commentId.split('_')[0];
+            
+            // Create a new comment on the post with the reply message
+            const replyUrl = `https://graph.facebook.com/v22.0/${postId}/comments`;
             const response = await axios.post(replyUrl, null, {
                 params: {
                     message,
@@ -1257,6 +1321,83 @@ export class FacebookService {
             return response.data;
         } catch (error: any) {
             console.error('Error getting page posts:', error);
+            throw error;
+        }
+    }
+
+    // Add these methods to the FacebookService class
+    async startVideoUpload(fileName: string, fileSize: number): Promise<UploadSession> {
+        try {
+            const uploadUrl = `https://graph.facebook.com/v22.0/${FACEBOOK_CONFIG.appId}/uploads`;
+            const response = await axios.post(uploadUrl, null, {
+                params: {
+                    file_name: fileName,
+                    file_length: fileSize,
+                    file_type: 'video/mp4',
+                    access_token: this.accessToken
+                }
+            });
+
+            console.log('Upload session started:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error starting video upload:', error);
+            throw error;
+        }
+    }
+
+    async uploadVideoChunk(sessionId: string, fileBuffer: Buffer, offset: number = 0): Promise<UploadResponse> {
+        try {
+            const uploadUrl = `https://graph.facebook.com/v22.0/${sessionId}`;
+            const response = await axios.post(uploadUrl, fileBuffer, {
+                headers: {
+                    'Authorization': `OAuth ${this.accessToken}`,
+                    'file_offset': offset.toString(),
+                    'Content-Type': 'application/octet-stream'
+                }
+            });
+
+            console.log('Video chunk uploaded:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error uploading video chunk:', error);
+            throw error;
+        }
+    }
+
+    async getUploadStatus(sessionId: string): Promise<UploadStatus> {
+        try {
+            const statusUrl = `https://graph.facebook.com/v22.0/${sessionId}`;
+            const response = await axios.get(statusUrl, {
+                headers: {
+                    'Authorization': `OAuth ${this.accessToken}`
+                }
+            });
+
+            console.log('Upload status:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error getting upload status:', error);
+            throw error;
+        }
+    }
+
+    async publishVideo(pageId: string, pageAccessToken: string, videoHandle: string, title?: string, description?: string) {
+        try {
+            const publishUrl = `https://graph-video.facebook.com/v22.0/${pageId}/videos`;
+            const response = await axios.post(publishUrl, null, {
+                params: {
+                    access_token: pageAccessToken,
+                    title: title,
+                    description: description,
+                    fbuploader_video_file_chunk: videoHandle
+                }
+            });
+
+            console.log('Video published:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error publishing video:', error);
             throw error;
         }
     }
