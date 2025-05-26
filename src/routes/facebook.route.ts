@@ -453,20 +453,31 @@ router.post('/pages', async (req, res) => {
     }
 });
 
-router.get('/pages', async (req, res) => {
+router.get('/pages', async (req: AuthRequest, res) => {
     try {
-        const facebookService: FacebookService = (req as any).facebookService;
-        const pages = await facebookService.getPages();
-        res.json(pages);
-    } catch (error: any) {
-        if (error.message.includes('Invalid or expired access token')) {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
             res.status(401).json({
-                error: 'Authentication Required',
-                message: 'Your Facebook access token is invalid or has expired.',
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        // Create FacebookService instance with just the access token
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const pages = await facebookService.getPages();
+        res.json({ data: pages }); // Return the pages array in a data property
+    } catch (error: any) {
+        if (error.message.includes('No business found')) {
+            res.status(400).json({
+                error: 'Business Required',
+                message: 'You need to create a Facebook Business account first.',
                 details: error.message,
                 nextSteps: [
-                    'Reconnect your Facebook account to get a new access token',
-                    'Make sure you have granted all required permissions'
+                    'Create a Facebook Business account',
+                    'Connect it to your Facebook account',
+                    'Try fetching pages again'
                 ]
             });
         } else {

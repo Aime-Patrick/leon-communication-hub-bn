@@ -701,27 +701,51 @@ export class FacebookService {
     // Get all pages associated with the user
     async getPages() {
         try {
-            // First verify access token (already done by constructor, but good to re-verify permissions)
-            await this.verifyAccessToken();
+            console.log('=== getPages: Starting API call ===');
+            
+            // First get business info to ensure we have the business ID
+            const businessInfo = await this.getBusinessInfo();
+            const businessId = businessInfo.businesses.data[0]?.id;
+            
+            if (!businessId) {
+                throw new Error('No business found. Please create a business first.');
+            }
 
             // Get pages through the business account
-            const business = new Business(FACEBOOK_CONFIG.businessId, this.api); 
+            const pagesUrl = `https://graph.facebook.com/v22.0/${businessId}/owned_pages`;
+            console.log('getPages: Calling Facebook Graph API:', pagesUrl);
             
-            // Get owned pages through the business account
-            const pages = await business.getOwnedPages(
-                ['id', 'name', 'category', 'access_token', 'tasks'],
-            );
+            const pagesParams = {
+                fields: [
+                    'id',
+                    'name',
+                    'category',
+                    'access_token',
+                    'tasks',
+                    'verification_status',
+                    'fan_count',
+                    'link'
+                ].join(','),
+                access_token: this.accessToken
+            };
 
-            if (!pages || pages.length === 0) {
+            const response = await axios.get(pagesUrl, { params: pagesParams });
+            console.log('getPages: Response:', JSON.stringify(response.data, null, 2));
+
+            if (!response.data || !response.data.data) {
                 return [];
             }
 
-            return pages;
+            return response.data.data;
         } catch (error: any) {
-            if (error.code === 2500) {
-                throw new Error('Invalid or expired access token. Please reconnect your Facebook account.');
-            }
-            console.error('Error fetching pages:', error);
+            console.error('getPages: Error fetching pages:', error);
+            console.error('getPages: Error details:', {
+                message: error.message,
+                code: error.code,
+                subcode: error.subcode,
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
+            });
             throw error;
         }
     }
