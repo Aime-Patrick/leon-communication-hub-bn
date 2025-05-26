@@ -619,4 +619,214 @@ router.post('/pages/:pageId/posts', protect, async (req: AuthRequest, res) => {
     }
 });
 
+// Get all posts from a page
+router.get('/pages/:pageId/posts', protect, async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { pageId } = req.params;
+
+        // Get page access token
+        const pageInfo = await facebookService.getPageInfo(pageId, user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        const posts = await facebookService.getPagePosts(pageId, pageInfo.access_token);
+        res.json(posts);
+    } catch (error: any) {
+        sendErrorResponse(res, 500, error, 'Failed to fetch page posts');
+    }
+});
+
+// Get comments for a post
+router.get('/posts/:postId/comments', protect, async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { postId } = req.params;
+
+        // Get page access token
+        const pageInfo = await facebookService.getPageInfo(postId.split('_')[0], user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        const comments = await facebookService.getComments(postId, pageInfo.access_token);
+        res.json(comments);
+    } catch (error: any) {
+        sendErrorResponse(res, 500, error, 'Failed to fetch comments');
+    }
+});
+
+// Get likes for a post
+router.get('/posts/:postId/likes', protect, async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { postId } = req.params;
+
+        // Get page access token
+        const pageInfo = await facebookService.getPageInfo(postId.split('_')[0], user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        const likes = await facebookService.getLikes(postId, pageInfo.access_token);
+        res.json(likes);
+    } catch (error: any) {
+        sendErrorResponse(res, 500, error, 'Failed to fetch likes');
+    }
+});
+
+// Add a comment to a post
+router.post('/posts/:postId/comments', protect, async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { postId } = req.params;
+        const { message } = req.body;
+
+        if (!message) {
+            res.status(400).json({
+                error: 'Message Required',
+                message: 'Please provide a message for the comment.'
+            });
+            return;
+        }
+
+        // Get page access token
+        const pageInfo = await facebookService.getPageInfo(postId.split('_')[0], user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        const comment = await facebookService.addComment(postId, pageInfo.access_token, message);
+        res.json(comment);
+    } catch (error: any) {
+        sendErrorResponse(res, 500, error, 'Failed to add comment');
+    }
+});
+
+// Reply to a comment
+router.post('/comments/:commentId/replies', protect, async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { commentId } = req.params;
+        const { message } = req.body;
+
+        if (!message) {
+            res.status(400).json({
+                error: 'Message Required',
+                message: 'Please provide a message for the reply.'
+            });
+            return;
+        }
+
+        // Get page access token
+        const pageInfo = await facebookService.getPageInfo(commentId.split('_')[0], user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        const reply = await facebookService.replyToComment(commentId, pageInfo.access_token, message);
+        res.json(reply);
+    } catch (error: any) {
+        sendErrorResponse(res, 500, error, 'Failed to add reply');
+    }
+});
+
+// Get post insights
+router.get('/posts/:postId/insights', protect, async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { postId } = req.params;
+
+        // Get page access token
+        const pageInfo = await facebookService.getPageInfo(postId.split('_')[0], user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        const insights = await facebookService.getPostInsights(postId, pageInfo.access_token);
+        res.json(insights);
+    } catch (error: any) {
+        sendErrorResponse(res, 500, error, 'Failed to fetch post insights');
+    }
+});
+
 export default router;

@@ -1123,4 +1123,141 @@ export class FacebookService {
             throw error;
         }
     }
+
+    // Get comments for a post
+    async getComments(postId: string, pageAccessToken: string) {
+        try {
+            const commentsUrl = `https://graph.facebook.com/v22.0/${postId}/comments`;
+            const response = await axios.get(commentsUrl, {
+                params: {
+                    fields: [
+                        'id',
+                        'message',
+                        'created_time',
+                        'from',
+                        'like_count',
+                        'comment_count',
+                        'parent'
+                    ].join(','),
+                    access_token: pageAccessToken
+                }
+            });
+
+            console.log('Comments response:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error getting comments:', error);
+            throw error;
+        }
+    }
+
+    // Get likes for a post
+    async getLikes(postId: string, pageAccessToken: string) {
+        try {
+            const likesUrl = `https://graph.facebook.com/v22.0/${postId}/likes`;
+            const response = await axios.get(likesUrl, {
+                params: {
+                    fields: ['id', 'name'].join(','),
+                    access_token: pageAccessToken
+                }
+            });
+
+            console.log('Likes response:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error getting likes:', error);
+            throw error;
+        }
+    }
+
+    // Add a comment to a post
+    async addComment(postId: string, pageAccessToken: string, message: string) {
+        try {
+            const commentUrl = `https://graph.facebook.com/v22.0/${postId}/comments`;
+            const response = await axios.post(commentUrl, null, {
+                params: {
+                    message,
+                    access_token: pageAccessToken
+                }
+            });
+
+            console.log('Comment response:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error adding comment:', error);
+            throw error;
+        }
+    }
+
+    // Reply to a comment
+    async replyToComment(commentId: string, pageAccessToken: string, message: string) {
+        try {
+            const replyUrl = `https://graph.facebook.com/v22.0/${commentId}/comments`;
+            const response = await axios.post(replyUrl, null, {
+                params: {
+                    message,
+                    access_token: pageAccessToken
+                }
+            });
+
+            console.log('Reply response:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error replying to comment:', error);
+            throw error;
+        }
+    }
+
+    // Get post insights (engagement metrics)
+    async getPostInsights(postId: string, pageAccessToken: string) {
+        try {
+            const insightsUrl = `https://graph.facebook.com/v22.0/${postId}/insights`;
+            const response = await axios.get(insightsUrl, {
+                params: {
+                    metric: [
+                        'post_impressions',
+                        'post_engagements',
+                        'post_reactions_by_type_total',
+                        'post_clicks',
+                        'post_shares'
+                    ].join(','),
+                    access_token: pageAccessToken
+                }
+            });
+
+            console.log('Post insights response:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error getting post insights:', error);
+            throw error;
+        }
+    }
+
+    // Get all posts from a page
+    async getPagePosts(pageId: string, pageAccessToken: string) {
+        try {
+            const postsUrl = `https://graph.facebook.com/v22.0/${pageId}/posts`;
+            const response = await axios.get(postsUrl, {
+                params: {
+                    fields: [
+                        'id',
+                        'message',
+                        'created_time',
+                        'full_picture',
+                        'permalink_url',
+                        'shares',
+                        'likes.summary(true)',
+                        'comments.summary(true)'
+                    ].join(','),
+                    access_token: pageAccessToken
+                }
+            });
+
+            console.log('Page posts response:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error getting page posts:', error);
+            throw error;
+        }
+    }
 }
