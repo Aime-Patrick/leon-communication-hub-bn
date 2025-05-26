@@ -757,49 +757,62 @@ export class FacebookService {
             console.log('=== getBusinessInfo: Starting API calls ===');
             console.log('getBusinessInfo: Using access token (first 30 chars):', this.accessToken.substring(0, 30) + '...');
 
-            // Initialize the API with the access token
-            const api = new FacebookAdsApi(this.accessToken);
-
             // Get user information
-            console.log('getBusinessInfo: Fetching /me data...');
-            const response = await api.call(
-                'GET',
-                '/me',
-                {
-                    fields: ['id', 'name', 'businesses', 'accounts']
-                }
-            );
-            console.log('getBusinessInfo: User Info Response:', JSON.stringify(response, null, 2));
+            const meUrl = 'https://graph.facebook.com/v22.0/me';
+            console.log('getBusinessInfo: Calling Facebook Graph API:', meUrl);
+            const meParams = {
+                fields: ['id', 'name', 'email'].join(','),
+                access_token: this.accessToken
+            };
+            console.log('getBusinessInfo: Request parameters:', {
+                ...meParams,
+                access_token: meParams.access_token.substring(0, 30) + '...'
+            });
+
+            const response = await axios.get(meUrl, { params: meParams });
+            console.log('getBusinessInfo: User Info Response:', JSON.stringify(response.data, null, 2));
 
             // Get businesses
-            console.log('getBusinessInfo: Fetching /me/businesses data...');
-            const businesses = await api.call(
-                'GET',
-                '/me/businesses',
-                {
-                    fields: ['id', 'name', 'verification_status']
-                }
-            );
-            console.log('getBusinessInfo: Businesses Response:', JSON.stringify(businesses, null, 2));
+            const businessesUrl = 'https://graph.facebook.com/v22.0/me/businesses';
+            console.log('getBusinessInfo: Calling Facebook Graph API:', businessesUrl);
+            const businessesParams = {
+                fields: ['id', 'name'].join(','),
+                access_token: this.accessToken
+            };
+            console.log('getBusinessInfo: Request parameters:', {
+                ...businessesParams,
+                access_token: businessesParams.access_token.substring(0, 30) + '...'
+            });
+
+            const businessesResponse = await axios.get(businessesUrl, { params: businessesParams });
+            console.log('getBusinessInfo: Businesses Response:', JSON.stringify(businessesResponse.data, null, 2));
 
             // Get ad accounts
-            console.log('getBusinessInfo: Fetching /me/adaccounts data...');
-            const adAccounts = await api.call(
-                'GET',
-                '/me/adaccounts',
-                {
-                    fields: [
-                        'id',
-                        'name',
-                        'account_status',
-                        'business',
-                        'currency',
-                        'timezone_name',
-                        'owner',
-                        'account_id'
-                    ]
-                }
-            ) as AdAccountsResponse;
+            const adAccountsUrl = 'https://graph.facebook.com/v22.0/me/adaccounts';
+            console.log('getBusinessInfo: Calling Facebook Graph API:', adAccountsUrl);
+            const adAccountsParams = {
+                fields: [
+                    'id',
+                    'name',
+                    'account_status',
+                    'business{id,name}',
+                    'currency',
+                    'timezone_name',
+                    'owner{id,name}',
+                    'account_id',
+                    'balance',
+                    'spend_cap',
+                    'amount_spent'
+                ].join(','),
+                access_token: this.accessToken
+            };
+            console.log('getBusinessInfo: Request parameters:', {
+                ...adAccountsParams,
+                access_token: adAccountsParams.access_token.substring(0, 30) + '...'
+            });
+
+            const adAccountsResponse = await axios.get(adAccountsUrl, { params: adAccountsParams });
+            const adAccounts = adAccountsResponse.data as AdAccountsResponse;
             console.log('getBusinessInfo: Raw Ad Accounts Response:', JSON.stringify(adAccounts, null, 2));
 
             // Process ad accounts
@@ -823,41 +836,46 @@ export class FacebookService {
                 if (!FACEBOOK_CONFIG.businessId.match(/^\d+$/)) {
                     console.warn(`getBusinessInfo: FACEBOOK_CONFIG.businessId (${FACEBOOK_CONFIG.businessId}) seems malformed or is an Ad Account ID. Skipping business details fetch.`);
                     return { 
-                        userInfo: response, 
-                        businesses, 
+                        userInfo: response.data, 
+                        businesses: businessesResponse.data, 
                         adAccounts: processedAdAccounts 
                     };
                 }
-                console.log('getBusinessInfo: Fetching business details for ID:', FACEBOOK_CONFIG.businessId);
-                const businessDetails = await api.call(
-                    'GET',
-                    `/${FACEBOOK_CONFIG.businessId}`,
-                    {
-                        fields: ['id', 'name', 'verification_status', 'owned_pages', 'owned_instagram_accounts']
-                    }
-                );
-                console.log('getBusinessInfo: Business Details Response:', JSON.stringify(businessDetails, null, 2));
+                const businessUrl = `https://graph.facebook.com/v22.0/${FACEBOOK_CONFIG.businessId}`;
+                console.log('getBusinessInfo: Calling Facebook Graph API:', businessUrl);
+                const businessParams = {
+                    fields: ['id', 'name'].join(','),
+                    access_token: this.accessToken
+                };
+                console.log('getBusinessInfo: Request parameters:', {
+                    ...businessParams,
+                    access_token: businessParams.access_token.substring(0, 30) + '...'
+                });
+
+                const businessResponse = await axios.get(businessUrl, { params: businessParams });
+                console.log('getBusinessInfo: Business Details Response:', JSON.stringify(businessResponse.data, null, 2));
                 return {
-                    userInfo: response,
-                    businesses,
+                    userInfo: response.data,
+                    businesses: businessesResponse.data,
                     adAccounts: processedAdAccounts,
-                    currentBusiness: businessDetails
+                    currentBusiness: businessResponse.data
                 };
             }
 
             console.log('=== getBusinessInfo: API calls completed successfully ===');
             return { 
-                userInfo: response, 
-                businesses, 
+                userInfo: response.data, 
+                businesses: businessesResponse.data, 
                 adAccounts: processedAdAccounts 
             };
-        } catch (error) {
+        } catch (error: any) {
             console.error('getBusinessInfo: Error fetching business information:', error);
             console.error('getBusinessInfo: Error details:', {
                 message: error.message,
                 code: error.code,
                 subcode: error.subcode,
-                error_user_msg: error.error_user_msg
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
             });
             throw error;
         }
