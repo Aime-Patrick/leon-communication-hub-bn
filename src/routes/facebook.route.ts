@@ -585,4 +585,38 @@ router.put('/pages/:pageId', protect, async (req: AuthRequest, res) => {
     }
 });
 
+router.post('/pages/:pageId/posts', protect, async (req: AuthRequest, res) => {
+    try {
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        // Initialize FacebookService with the user's access token
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        const { pageId } = req.params;
+        const content = req.body;
+
+        // First get the page access token
+        const pageInfo = await facebookService.getPageInfo(pageId, user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        // Create the post using the page access token
+        const post = await facebookService.createPost(pageId, pageInfo.access_token, content);
+        res.json(post);
+    } catch (error: any) {
+        sendErrorResponse(res, 500, error, 'Failed to create post');
+    }
+});
+
 export default router;

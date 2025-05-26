@@ -1023,4 +1023,104 @@ export class FacebookService {
             throw error;
         }
     }
+
+    // Create a post on a Facebook page
+    async createPost(pageId: string, pageAccessToken: string, content: {
+        message?: string;
+        link?: string;
+        video_url?: string;
+        video_title?: string;
+        video_description?: string;
+        image_url?: string;
+        scheduled_publish_time?: number;
+    }) {
+        try {
+            console.log('Creating post with data:', {
+                pageId,
+                hasMessage: !!content.message,
+                hasLink: !!content.link,
+                hasVideo: !!content.video_url,
+                hasImage: !!content.image_url,
+                scheduledTime: content.scheduled_publish_time
+            });
+
+            // If we have a video, we need to upload it first
+            if (content.video_url) {
+                // First, create a video container
+                const videoContainerUrl = `https://graph.facebook.com/v22.0/${pageId}/videos`;
+                const videoContainerResponse = await axios.post(videoContainerUrl, null, {
+                    params: {
+                        file_url: content.video_url,
+                        title: content.video_title,
+                        description: content.video_description,
+                        access_token: pageAccessToken
+                    }
+                });
+
+                console.log('Video upload response:', videoContainerResponse.data);
+
+                if (!videoContainerResponse.data || videoContainerResponse.data.error) {
+                    throw new Error(videoContainerResponse.data?.error?.message || 'Failed to upload video');
+                }
+
+                // If we have a message, create a post with the video
+                if (content.message) {
+                    const postUrl = `https://graph.facebook.com/v22.0/${pageId}/feed`;
+                    const response = await axios.post(postUrl, null, {
+                        params: {
+                            message: content.message,
+                            video_id: videoContainerResponse.data.id,
+                            access_token: pageAccessToken
+                        }
+                    });
+
+                    console.log('Post with video response:', response.data);
+                    return response.data;
+                }
+
+                return videoContainerResponse.data;
+            }
+
+            // If we have an image, we need to upload it first
+            if (content.image_url) {
+                const photoUrl = `https://graph.facebook.com/v22.0/${pageId}/photos`;
+                const response = await axios.post(photoUrl, null, {
+                    params: {
+                        url: content.image_url,
+                        message: content.message,
+                        access_token: pageAccessToken
+                    }
+                });
+
+                console.log('Photo upload response:', response.data);
+                return response.data;
+            }
+
+            // Regular post (text and/or link)
+            const postUrl = `https://graph.facebook.com/v22.0/${pageId}/feed`;
+            const response = await axios.post(postUrl, null, {
+                params: {
+                    ...content,
+                    access_token: pageAccessToken
+                }
+            });
+
+            console.log('Post creation response:', response.data);
+
+            if (!response.data || response.data.error) {
+                throw new Error(response.data?.error?.message || 'Failed to create post');
+            }
+
+            return response.data;
+        } catch (error: any) {
+            console.error('Error creating post:', {
+                message: error.message,
+                code: error.code,
+                subcode: error.subcode,
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
+            });
+            throw error;
+        }
+    }
 }
