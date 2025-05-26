@@ -428,6 +428,23 @@ router.get('/business-info', async (req: AuthRequest, res) => {
 
         // Create FacebookService instance with just the access token
         const facebookService = new FacebookService(user.facebookAccessToken);
+        
+        // First get user info to get the Facebook user ID
+        const userInfo = await facebookService.getUserInfo();
+        if (!userInfo || !userInfo.id) {
+            throw new Error('Failed to get Facebook user ID');
+        }
+
+        // Try to get cached business info first
+        const cachedInfo = await facebookService.getCachedBusinessInfo(userInfo.id);
+        if (cachedInfo) {
+            console.log('Using cached business info from database');
+            res.json(cachedInfo);
+            return;
+        }
+
+        // If no cached data or it's stale, fetch fresh data
+        console.log('Fetching fresh business info from Facebook API');
         const businessInfo = await facebookService.getBusinessInfo();
         res.json(businessInfo);
     } catch (error: any) {
@@ -435,13 +452,48 @@ router.get('/business-info', async (req: AuthRequest, res) => {
     }
 });
 
-router.post('/pages', async (req, res) => {
+router.post('/pages', async (req: AuthRequest, res) => {
     try {
-        const facebookService: FacebookService = (req as any).facebookService;
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        // Check if token is expired
+        if (user.facebookAccessTokenExpires && new Date(user.facebookAccessTokenExpires) < new Date()) {
+            res.status(401).json({
+                error: 'Token Expired',
+                message: 'Your Facebook access token has expired. Please reconnect your Facebook account.',
+                nextSteps: ['Visit /api/facebook/auth/login to reconnect your Facebook account']
+            });
+            return;
+        }
+
+        // Create FacebookService instance with just the access token
+        const facebookService = new FacebookService(user.facebookAccessToken);
+        
+        // First verify the token and get user info
+        try {
+            const userInfo = await facebookService.getUserInfo();
+            console.log('User info retrieved successfully:', userInfo);
+        } catch (error: any) {
+            console.error('Error verifying token:', error);
+            res.status(401).json({
+                error: 'Invalid Token',
+                message: 'Your Facebook access token is invalid. Please reconnect your Facebook account.',
+                nextSteps: ['Visit /api/facebook/auth/login to reconnect your Facebook account']
+            });
+            return;
+        }
+
         const pageData: PageData = req.body;
         const page = await facebookService.createPage(pageData);
 
-        const user: IUser = req.user as IUser; // req.user should be populated by 'protect'
+        // Save the page ID and access token to the user's record
         user.facebookPageId = page.id;
         user.facebookPageAccessToken = page.access_token;
         await user.save();
@@ -449,7 +501,20 @@ router.post('/pages', async (req, res) => {
 
         res.json(page);
     } catch (error: any) {
-        sendErrorResponse(res, 500, error, 'Failed to create page');
+        if (error.message.includes('No business found')) {
+            res.status(400).json({
+                error: 'Business Required',
+                message: 'You need to create a Facebook Business account first.',
+                details: error.message,
+                nextSteps: [
+                    'Create a Facebook Business account',
+                    'Connect it to your Facebook account',
+                    'Try creating the page again'
+                ]
+            });
+        } else {
+            sendErrorResponse(res, 500, error, 'Failed to create page');
+        }
     }
 });
 
@@ -486,12 +551,34 @@ router.get('/pages', async (req: AuthRequest, res) => {
     }
 });
 
-router.put('/pages/:pageId', async (req, res) => {
+router.put('/pages/:pageId', protect, async (req: AuthRequest, res) => {
     try {
-        const facebookService: FacebookService = (req as any).facebookService;
+        const user: IUser = req.user as IUser;
+        if (!user || !user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Integration Required',
+                message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+            });
+            return;
+        }
+
+        // Initialize FacebookService with the user's access token
+        const facebookService = new FacebookService(user.facebookAccessToken);
         const { pageId } = req.params;
         const updates: Partial<PageData> = req.body;
-        const page = await facebookService.updatePage(pageId, updates);
+
+        // First get the page access token
+        const pageInfo = await facebookService.getPageInfo(pageId, user.facebookAccessToken);
+        if (!pageInfo || !pageInfo.access_token) {
+            res.status(400).json({
+                error: 'Page Access Error',
+                message: 'Could not get access token for this page. Please ensure you have the necessary permissions.'
+            });
+            return;
+        }
+
+        // Now update the page using the page access token
+        const page = await facebookService.updatePage(pageId, pageInfo.access_token, updates);
         res.json(page);
     } catch (error: any) {
         sendErrorResponse(res, 500, error, 'Failed to update page');

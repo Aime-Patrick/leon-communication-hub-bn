@@ -1,6 +1,7 @@
 import { AdAccount, Campaign, AdSet, Ad, AbstractCrudObject, User, Business, FacebookAdsApi, Page } from 'facebook-nodejs-business-sdk';
 import { FACEBOOK_CONFIG, initializeFacebookAPI } from '../config/facebook.config';
 import axios from 'axios'; // For making HTTP requests to Facebook's Graph API directly
+import { Business as BusinessModel, IBusiness } from '../models/Business';
 
 // Type definitions for campaign data
 export type CampaignObjective =
@@ -82,33 +83,32 @@ export interface CampaignData {
 
 // Add type definitions for Page creation
 export type PageCategory =
-    | 'Business'
-    | 'Company'
-    | 'Organization'
-    | 'Brand'
-    | 'Product/Service'
-    | 'Local Business'
-    | 'Restaurant'
-    | 'Retail'
-    | 'Shopping & Retail'
-    | 'E-commerce Website'
-    | 'Website'
-    | 'Blog'
-    | 'Media'
-    | 'Entertainment'
-    | 'Technology'
-    | 'Education'
-    | 'Non-profit Organization'
-    | 'Community Organization'
-    | 'Public Figure'
-    | 'Artist'
-    | 'Musician'
-    | 'Writer'
-    | 'Personal Blog';
+    | 'COMPANY'
+    | 'ORGANIZATION'
+    | 'BRAND'
+    | 'PRODUCT_SERVICE'
+    | 'LOCAL_BUSINESS'
+    | 'RESTAURANT'
+    | 'RETAIL'
+    | 'SHOPPING_RETAIL'
+    | 'ECOMMERCE_WEBSITE'
+    | 'WEBSITE'
+    | 'BLOG'
+    | 'MEDIA'
+    | 'ENTERTAINMENT'
+    | 'TECHNOLOGY'
+    | 'EDUCATION'
+    | 'NONPROFIT_ORGANIZATION'
+    | 'COMMUNITY_ORGANIZATION'
+    | 'PUBLIC_FIGURE'
+    | 'ARTIST'
+    | 'MUSICIAN'
+    | 'WRITER'
+    | 'PERSONAL_BLOG';
 
 export interface PageData {
-    name: string;
-    category: PageCategory;
+    name?: string;
+    category?: PageCategory;
     about?: string;
     website?: string;
     phone?: string;
@@ -242,7 +242,6 @@ export class FacebookService {
     }
 
     // Verify access token with retry
-    // This method now uses the internal accessToken
     async verifyAccessToken(retries = 3): Promise<void> {
         let lastError: any;
 
@@ -254,37 +253,27 @@ export class FacebookService {
                     throw new Error('Access token is missing from service instance');
                 }
 
-                // Use the global API instance for calls
-                const userResponse = await this.api.call(
-                    'GET',
-                    '/me',
-                    {
-                        fields: ['id', 'name']
-                    }
-                ) as {
-                    id: string;
-                    name: string;
+                // Get user info using axios
+                const userUrl = 'https://graph.facebook.com/v22.0/me';
+                const userParams = {
+                    fields: ['id', 'name'].join(','),
+                    access_token: this.accessToken
                 };
 
-                console.log('User verification response:', userResponse);
+                const userResponse = await axios.get(userUrl, { params: userParams });
+                console.log('User verification response:', userResponse.data);
 
-                if (!userResponse || !userResponse.id) {
+                if (!userResponse.data || !userResponse.data.id) {
                     throw new Error('Invalid access token - unable to fetch user data');
                 }
 
-                // Now check permissions
-                const permissionsResponse = await this.api.call(
-                    'GET',
-                    '/me/permissions',
-                    {}
-                ) as {
-                    data: Array<{
-                        permission: string;
-                        status: string;
-                    }>;
-                };
+                // Get permissions using axios
+                const permissionsUrl = 'https://graph.facebook.com/v22.0/me/permissions';
+                const permissionsResponse = await axios.get(permissionsUrl, {
+                    params: { access_token: this.accessToken }
+                });
 
-                console.log('Permissions response:', permissionsResponse);
+                console.log('Permissions response:', permissionsResponse.data);
 
                 const requiredPermissions = [
                     'ads_management',
@@ -298,9 +287,9 @@ export class FacebookService {
                     'pages_manage_engagement',
                 ];
 
-                const grantedPermissions = permissionsResponse.data
-                    .filter(p => p.status === 'granted')
-                    .map(p => p.permission);
+                const grantedPermissions = permissionsResponse.data.data
+                    .filter((p: { permission: string; status: string }) => p.status === 'granted')
+                    .map((p: { permission: string; status: string }) => p.permission);
 
                 console.log('Granted permissions:', grantedPermissions);
 
@@ -319,7 +308,8 @@ export class FacebookService {
                     message: error.message,
                     code: error.code,
                     subcode: error.subcode,
-                    error_user_msg: error.error_user_msg
+                    error_user_msg: error.error_user_msg,
+                    response: error.response?.data
                 });
                 
                 lastError = error;
@@ -439,22 +429,37 @@ export class FacebookService {
         if (!data.name || data.name.trim().length === 0) {
             throw new Error('Page name is required');
         }
-        if (!data.category) {
-            throw new Error('Page category is required');
-        }
-        // Validate category is one of the allowed values
-        const validCategories: PageCategory[] = [
-            'Business', 'Company', 'Organization', 'Brand', 'Product/Service',
-            'Local Business', 'Restaurant', 'Retail', 'Shopping & Retail',
-            'E-commerce Website', 'Website', 'Blog', 'Media', 'Entertainment',
-            'Technology', 'Education',
-            'Non-profit Organization',
-            'Community Organization', 'Public Figure', 'Artist', 'Musician',
-            'Writer', 'Personal Blog'
-        ];
-        if (!validCategories.includes(data.category)) {
-            throw new Error(`Invalid page category. Must be one of: ${validCategories.join(', ')}`);
-        }
+        // if (!data.category) {
+        //     throw new Error('Page category is required');
+        // }
+        // // Validate category is one of the allowed values
+        // const validCategories: PageCategory[] = [
+        //     'COMPANY',
+        //     'ORGANIZATION',
+        //     'BRAND',
+        //     'PRODUCT_SERVICE',
+        //     'LOCAL_BUSINESS',
+        //     'RESTAURANT',
+        //     'RETAIL',
+        //     'SHOPPING_RETAIL',
+        //     'ECOMMERCE_WEBSITE',
+        //     'WEBSITE',
+        //     'BLOG',
+        //     'MEDIA',
+        //     'ENTERTAINMENT',
+        //     'TECHNOLOGY',
+        //     'EDUCATION',
+        //     'NONPROFIT_ORGANIZATION',
+        //     'COMMUNITY_ORGANIZATION',
+        //     'PUBLIC_FIGURE',
+        //     'ARTIST',
+        //     'MUSICIAN',
+        //     'WRITER',
+        //     'PERSONAL_BLOG'
+        // ];
+        // if (!validCategories.includes(data.category as PageCategory)) {
+        //     throw new Error(`Invalid page category. Must be one of: ${validCategories.join(', ')}`);
+        // }
     }
 
     // Create a new campaign
@@ -590,12 +595,8 @@ export class FacebookService {
     // Create a new Facebook Page
     async createPage(data: PageData): Promise<PageCreationResponse> {
         try {
-            // First verify access token (already done by constructor, but good to re-verify permissions)
+            // First verify access token
             await this.verifyAccessToken();
-
-            // Then verify user permissions
-            const permissions = await this.verifyPermissions();
-            console.log('Permissions verified:', permissions);
 
             // Validate page data
             this.validatePageData(data);
@@ -607,65 +608,67 @@ export class FacebookService {
                 hasWebsite: !!data.website
             });
 
+            // Get business info to ensure we have the business ID
+            const businessInfo = await this.getBusinessInfo();
+            const businessId = businessInfo.businesses.data[0]?.id;
+            
+            if (!businessId) {
+                throw new Error('No business found. Please create a business first.');
+            }
+
             // Create the page using the business account
-            // Ensure the access token is passed for this API call
-            const response = await this.api.call( // Use this.api
-                'POST',
-                `/${FACEBOOK_CONFIG.businessId}/owned_pages`,
-                {
+            const pageUrl = `https://graph.facebook.com/v22.0/${businessId}/pages`;
+            const response = await axios.post(pageUrl, null, {
+                params: {
                     name: data.name,
                     category: data.category,
                     about: data.about,
-                    website: data.website,
-                    phone: data.phone,
-                    address: data.address,
-                    city: data.city,
-                    state: data.state,
-                    zip: data.zip,
-                    country: data.country,
-                    access_token: this.accessToken // Explicitly pass the user's access token
+                    access_token: this.accessToken
                 }
-            ) as {
-                id: string;
-                name: string;
-                category: string;
-                access_token: string; // This is the page access token
-                tasks?: string[];
-                perms?: string[];
-            };
+            });
 
-            console.log('Page creation response:', response);
+            console.log('Page creation response:', response.data);
 
             // Ensure response has the required fields
-            if (!response || !response.id || !response.name || !response.category || !response.access_token) {
+            if (!response.data || !response.data.id || !response.data.name || !response.data.category || !response.data.access_token) {
                 throw new Error('Invalid response from Facebook API');
             }
 
+            // If we have additional data to update, do it in a separate call
+            if (data.website || data.phone || data.address) {
+                const updateUrl = `https://graph.facebook.com/v22.0/${response.data.id}`;
+                await axios.post(updateUrl, null, {
+                    params: {
+                        website: data.website,
+                        phone: data.phone,
+                        address: data.address,
+                        city: data.city,
+                        state: data.state,
+                        zip: data.zip,
+                        country: data.country,
+                        access_token: response.data.access_token  // Use the page access token for updates
+                    }
+                });
+            }
+
             const page: PageCreationResponse = {
-                id: response.id,
-                name: response.name,
-                category: response.category,
-                access_token: response.access_token,
-                tasks: response.tasks,
-                perms: response.perms
+                id: response.data.id,
+                name: response.data.name,
+                category: response.data.category,
+                access_token: response.data.access_token,
+                tasks: response.data.tasks,
+                perms: response.data.perms
             };
 
             console.log('Page created successfully:', page);
-
-            // Connect the page to the ad account (this part needs careful testing)
-            // This might be more about assigning user roles/permissions within Business Manager
-            // rather than a direct API "connection" for advertising.
-            // Consider if this step is truly necessary or if the page is implicitly available
-            // once created under the business and the user has correct permissions.
-            await this.connectPageToAdAccount(page.id);
-            
             return page;
         } catch (error: any) {
             console.error('Error creating page:', {
                 message: error.message,
                 code: error.code,
                 subcode: error.subcode,
-                error_user_msg: error.error_user_msg
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
             });
             throw error;
         }
@@ -751,26 +754,81 @@ export class FacebookService {
     }
 
     // Update page information
-    async updatePage(pageId: string, data: Partial<PageData>) {
+    async updatePage(pageId: string, pageAccessToken: string, updates: Partial<PageData> = {}) {
         try {
-            // When updating a page, you typically need the PAGE access token, not the user access token.
-            // You would need to retrieve the page's access token first (e.g., from your database where you stored it).
-            // For simplicity, this example still uses the user's access token, which might work for some fields
-            // if the user has sufficient permissions, but it's not the standard way for page management.
-            const pageAccessToken = this.accessToken; // Placeholder: Replace with actual page access token
-            
-            const result = await this.api.call( // Use this.api
-                'POST',
-                `/${pageId}`,
-                {
-                    ...data,
-                    access_token: pageAccessToken // Use the page access token
+            console.log('Updating page with data:', {
+                pageId,
+                hasAbout: !!updates.about,
+                hasWebsite: !!updates.website,
+                hasPhone: !!updates.phone,
+                hasAddress: !!updates.address
+            });
+
+            const updateUrl = `https://graph.facebook.com/v22.0/${pageId}`;
+            const response = await axios.post(updateUrl, null, {
+                params: {
+                    ...updates,
+                    access_token: pageAccessToken
                 }
-            );
-            console.log('Page updated successfully:', result);
-            return result;
-        } catch (error) {
-            console.error('Error updating page:', error);
+            });
+
+            console.log('Page update response:', response.data);
+
+            if (!response.data || response.data.error) {
+                throw new Error(response.data?.error?.message || 'Failed to update page');
+            }
+
+            return response.data;
+        } catch (error: any) {
+            console.error('Error updating page:', {
+                message: error.message,
+                code: error.code,
+                subcode: error.subcode,
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
+            });
+            throw error;
+        }
+    }
+
+    // Get page information
+    async getPageInfo(pageId: string, pageAccessToken: string) {
+        try {
+            const pageUrl = `https://graph.facebook.com/v22.0/${pageId}`;
+            const response = await axios.get(pageUrl, {
+                params: {
+                    fields: [
+                        'id',
+                        'name',
+                        'category',
+                        'about',
+                        'website',
+                        'phone',
+                        'location',
+                        'fan_count',
+                        'verification_status',
+                        'link',
+                        'access_token'  // Add access_token to the fields
+                    ].join(','),
+                    access_token: pageAccessToken
+                }
+            });
+
+            console.log('Page info response:', response.data);
+
+            if (!response.data || response.data.error) {
+                throw new Error(response.data?.error?.message || 'Failed to get page info');
+            }
+
+            return response.data;
+        } catch (error: any) {
+            console.error('Error getting page info:', {
+                message: error.message,
+                code: error.code,
+                subcode: error.subcode,
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
+            });
             throw error;
         }
     }
@@ -878,6 +936,22 @@ export class FacebookService {
 
                 const businessResponse = await axios.get(businessUrl, { params: businessParams });
                 console.log('getBusinessInfo: Business Details Response:', JSON.stringify(businessResponse.data, null, 2));
+
+                // Save or update business info in database
+                const businessData = {
+                    facebookUserId: response.data.id,
+                    businessId: FACEBOOK_CONFIG.businessId,
+                    name: businessResponse.data.name,
+                    adAccounts: processedAdAccounts.data,
+                    lastUpdated: new Date()
+                };
+
+                await BusinessModel.findOneAndUpdate(
+                    { facebookUserId: response.data.id, businessId: FACEBOOK_CONFIG.businessId },
+                    businessData,
+                    { upsert: true, new: true }
+                );
+
                 return {
                     userInfo: response.data,
                     businesses: businessesResponse.data,
@@ -901,6 +975,51 @@ export class FacebookService {
                 error_user_msg: error.error_user_msg,
                 response: error.response?.data
             });
+            throw error;
+        }
+    }
+
+    // Add a new method to get cached business info
+    async getCachedBusinessInfo(facebookUserId: string) {
+        try {
+            const business = await BusinessModel.findOne({ facebookUserId });
+            if (!business) {
+                return null;
+            }
+
+            // Check if the data is older than 1 hour
+            const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+            if (business.lastUpdated < oneHourAgo) {
+                // Data is stale, fetch fresh data
+                return this.getBusinessInfo();
+            }
+
+            return {
+                businessId: business.businessId,
+                name: business.name,
+                adAccounts: { data: business.adAccounts },
+                lastUpdated: business.lastUpdated
+            };
+        } catch (error) {
+            console.error('Error getting cached business info:', error);
+            // If there's an error with the cache, fall back to API call
+            return this.getBusinessInfo();
+        }
+    }
+
+    // Get basic user information
+    async getUserInfo() {
+        try {
+            const meUrl = 'https://graph.facebook.com/v22.0/me';
+            const meParams = {
+                fields: ['id', 'name', 'email'].join(','),
+                access_token: this.accessToken
+            };
+
+            const response = await axios.get(meUrl, { params: meParams });
+            return response.data;
+        } catch (error: any) {
+            console.error('Error getting user info:', error);
             throw error;
         }
     }
