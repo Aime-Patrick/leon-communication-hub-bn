@@ -21,8 +21,16 @@ export interface IUser extends Document {
     facebookBusinessId?: string;  // The ID of the business account the user wants to manage
     // If you plan to manage multiple pages per user, consider a separate 'Page' model
     // For simplicity, if a user primarily manages one page for marketing, you could store it here:
-    facebookPageId?: string;      // The ID of a primary Facebook Page associated with this user
+    facebookPageId?: string;      // The ID of a primary Facebook Page
     facebookPageAccessToken?: string; // The access token for the primary Facebook Page
+
+    // --- NEW TIKTOK FIELDS ---
+    tiktok?: {
+        id: string;
+        accessToken: string;
+        refreshToken: string;
+        expiresAt: Date;
+    };
 
     createdAt: Date;
     updatedAt: Date;
@@ -85,6 +93,26 @@ const userSchema = new mongoose.Schema({
     facebookPageAccessToken: {
         type: String,
         required: false
+    },
+
+    // --- NEW TIKTOK SCHEMA FIELDS ---
+    tiktok: {
+        id: {
+            type: String,
+            required: false
+        },
+        accessToken: {
+            type: String,
+            required: false
+        },
+        refreshToken: {
+            type: String,
+            required: false
+        },
+        expiresAt: {
+            type: Date,
+            required: false
+        }
     }
 }, {
     timestamps: true,
@@ -100,6 +128,9 @@ const userSchema = new mongoose.Schema({
             delete ret.gmailRefreshToken;
             delete ret.gmailAccessToken;
             delete ret.gmailAccessTokenExpires;
+            delete ret.tiktok?.accessToken;
+            delete ret.tiktok?.refreshToken;
+            delete ret.tiktok?.expiresAt;
             return ret;
         }
     }

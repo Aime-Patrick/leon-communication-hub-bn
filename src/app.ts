@@ -12,7 +12,7 @@ import appRoutes from './routes/app.route';
 import { checkFirstTimeSetup } from './utils/setup';
 import { connectDB } from './config/database';
 import crypto from 'crypto';
-
+import tiktokRoutes from './routes/tiktok.route'
 interface SessionData {
     oauthState?: string;           // For OAuth flow
     facebookConnectUserId?: string; // User ID during Facebook connection
@@ -145,6 +145,7 @@ connectDB()
             app.use('/api/whatsapp', whatsappRoutes);
             app.use('/api/facebook', facebookRoutes);
             app.use('/api/user', userRoutes);
+            app.use('/api/tiktok',tiktokRoutes)
         }
     })
     .catch((error: any) => {

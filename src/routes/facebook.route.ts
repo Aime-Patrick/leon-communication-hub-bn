@@ -13,7 +13,7 @@ import fs from 'fs';
 const router = express.Router();
 
 // Helper function for consistent error responses
-const sendErrorResponse = (res: express.Response, statusCode: number, error: any, defaultMessage: string) => {
+export const sendErrorResponse = (res: express.Response, statusCode: number, error: any, defaultMessage: string) => {
     console.error('API Error:', {
         endpoint: res.req.path,
         message: error.message,
