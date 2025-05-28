@@ -315,39 +315,40 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
 // and it assumes req.user is populated by your main application's 'protect' middleware.
 
 router.use(protect);
-// router.use(async (req, res, next) => {
-//     console.log('--- Facebook Router Protected Middleware ---');
-//     const user: IUser = req.user as IUser; // req.user should be populated by app.use(protect
-//     console.log('user', user)
-//     if (!user) {
-//         console.error('Facebook Router Protected Middleware: User not authenticated (req.user is null/undefined).');
-//          res.status(401).json({
-//             error: 'Authentication Required',
-//             message: 'User not authenticated in your application. Please log in first.'
-//         });
-//         return;
-//     }
+router.use(async (req:AuthRequest, res, next) => {
+    console.log('--- Facebook Router Protected Middleware ---');
+    const user: IUser = req.user as IUser;
+    console.log('user', user);
+    if (!user) {
+        console.error('Facebook Router Protected Middleware: User not authenticated (req.user is null/undefined).');
+        res.status(401).json({
+            error: 'Authentication Required',
+            message: 'User not authenticated in your application. Please log in first.'
+        });
+        return;
+    }
 
-//     const facebookAccessToken = user.facebookAccessToken;
-//     const facebookAdAccountId = user.facebookAdAccountId;
+    const facebookAccessToken = user.facebookAccessToken;
+    const facebookAdAccountId = user.facebookAdAccountId;
 
-//     console.log('Facebook Router Protected Middleware: User email:', user.email);
-//     console.log('Facebook Router Protected Middleware: Token from DB (first 30 chars):', facebookAccessToken?.substring(0, 30) + '...');
-//     console.log('Facebook Router Protected Middleware: Ad Account ID from DB:', facebookAdAccountId);
+    console.log('Facebook Router Protected Middleware: User email:', user.email);
+    console.log('Facebook Router Protected Middleware: Token from DB (first 30 chars):', facebookAccessToken?.substring(0, 30) + '...');
+    console.log('Facebook Router Protected Middleware: Ad Account ID from DB:', facebookAdAccountId);
 
-//     if (!facebookAccessToken || !facebookAdAccountId) {
-//         console.error('Facebook Router Protected Middleware: Missing Facebook access token or Ad Account ID in DB.');
-//          res.status(401).json({
-//             error: 'Facebook Integration Required',
-//             message: 'Your Facebook account is not connected or an Ad Account is not selected. Please visit /api/facebook/auth/login to connect.'
-//         });
-//         return;
-//     }
+    if (!facebookAccessToken) {
+        console.error('Facebook Router Protected Middleware: Missing Facebook access token in DB.');
+        res.status(401).json({
+            error: 'Facebook Integration Required',
+            message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
+        });
+        return;
+    }
 
-//     (req as any).facebookService = new FacebookService(facebookAccessToken, facebookAdAccountId);
-//     console.log('Facebook Router Protected Middleware: FacebookService initialized successfully.');
-//     next();
-// });
+    // Initialize FacebookService with just the access token
+    (req as any).facebookService = new FacebookService(facebookAccessToken, facebookAdAccountId);
+    console.log('Facebook Router Protected Middleware: FacebookService initialized successfully.');
+    next();
+});
 
 
 // --- Existing Marketing API Endpoints (now use the middleware for authentication) ---

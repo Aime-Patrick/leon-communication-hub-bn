@@ -35,12 +35,8 @@ export const protect = async (
         }
 
         const token = authHeader.split(" ")[1];
-
         // Verify token
-        const decoded: any = await verifyToken(token);
-
-        // Find user
-        const user = await User.findById(decoded._id).select("-password");
+        const user: any = await verifyToken(token);
         if (!user) {
             res.status(401).json({ error: "User not found" });
             return;

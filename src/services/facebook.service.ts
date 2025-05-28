@@ -145,38 +145,39 @@ interface UploadStatus {
 
 export class FacebookService {
     private api: FacebookAdsApi;
-    private adAccount: AdAccount;
+    private adAccount: AdAccount | null;
     private accessToken: string;
-    private adAccountId: string;
+    private adAccountId?: string | null;
 
     constructor(accessToken: string, adAccountId?: string) {
         try {
+            if (!accessToken) {
+                throw new Error('Access token is required');
+            }
+
             this.accessToken = accessToken;
+            this.adAccount = null;
+            this.adAccountId = null;
             
             // Initialize the global API instance with the access token
-            this.api = new FacebookAdsApi(this.accessToken);
-            console.log('FacebookService Constructor: Initialized API instance with access token');
+            this.api = FacebookAdsApi.init(this.accessToken);
+            console.log('FacebookService: API initialized');
             
-            // Only set up adAccount if adAccountId is provided
+            // Set up adAccount if adAccountId is provided
             if (adAccountId) {
-                // Fix the adAccountId: Ensure it's not empty and formatted correctly
-                if (adAccountId.trim() === '') {
-                    throw new Error('Ad Account ID cannot be empty. Please ensure FACEBOOK_AD_ACCOUNT_ID is set in your .env or provided by the user.');
-                }
+                // Clean and format the adAccountId
                 const cleanId = adAccountId.replace(/^act_/, '');
                 this.adAccountId = `act_${cleanId}`;
-                console.log('FacebookService Constructor: Using adAccountId:', this.adAccountId);
                 
                 // Create the AdAccount instance
                 this.adAccount = new AdAccount(this.adAccountId);
-                console.log('FacebookService Constructor: AdAccount instance created. AdAccount ID:', (this.adAccount as any)?._data?.id);
+                console.log('FacebookService: AdAccount initialized with ID:', this.adAccountId);
             } else {
-                console.log('FacebookService Constructor: No adAccountId provided, skipping AdAccount initialization');
+                console.log('FacebookService: No Ad Account ID provided, some features will be limited');
             }
-
         } catch (error: any) {
-            console.error('Error in FacebookService constructor:', error);
-            throw error;
+            console.error('FacebookService initialization error:', error);
+            throw new Error(`Failed to initialize Facebook service: ${error.message}`);
         }
     }
 
@@ -339,7 +340,7 @@ export class FacebookService {
     async verifyAppCapabilities() {
         try {
             // First get basic ad account details
-            const response = await this.adAccount.get([
+            const response = await this.adAccount?.get([
                 'id',
                 'name',
                 'account_status',
@@ -352,7 +353,7 @@ export class FacebookService {
             const accountDetails = response as unknown as AdAccountDetails;
 
             // Get users with access
-            const users = await this.adAccount.get([
+            const users = await this.adAccount?.get([
                 'users'
             ]);
 
@@ -360,7 +361,7 @@ export class FacebookService {
             let assignedUsers = null;
             if (accountDetails.business?.id) {
                 const business = accountDetails.business;
-                assignedUsers = await this.adAccount.get([
+                assignedUsers = await this.adAccount?.get([
                     'assigned_users'
                 ], {
                     business: business.id
@@ -382,7 +383,7 @@ export class FacebookService {
     async verifyPermissions() {
         try {
             // Check if we can access the ad account
-            const account = await this.adAccount.get(['id', 'name', 'account_status']);
+            const account = await this.adAccount?.get(['id', 'name', 'account_status']);
 
             // Check user permissions - User constructor should pick up global API
             const user = new User('me'); // Removed this.api
@@ -391,7 +392,7 @@ export class FacebookService {
             );
 
             // Check if we can read campaigns
-            const campaigns = await this.adAccount.getCampaigns(['id']);
+            const campaigns = await this.adAccount?.getCampaigns(['id']);
 
             // Check app capabilities
             const appCapabilities = await this.verifyAppCapabilities();
@@ -522,12 +523,36 @@ export class FacebookService {
     // Get all campaigns
     async getCampaigns() {
         try {
-            const campaigns = await this.adAccount.getCampaigns(
-                ['id', 'name', 'status', 'objective', 'created_time', 'special_ad_categories', 'buying_type']
-            );
-            return campaigns;
-        } catch (error) {
-            console.error('Error fetching campaigns:', error);
+            if (!this.adAccountId) {
+                throw new Error('Ad Account ID is required');
+            }
+
+            const campaignsUrl = `https://graph.facebook.com/v22.0/${this.adAccountId}/campaigns`;
+            const response = await axios.get(campaignsUrl, {
+                params: {
+                    fields: [
+                        'id',
+                        'name',
+                        'status',
+                        'objective',
+                        'created_time',
+                        'special_ad_categories',
+                        'buying_type'
+                    ].join(','),
+                    access_token: this.accessToken
+                }
+            });
+
+            console.log('Campaigns response:', response.data);
+            return response.data.data || []; // Return just the campaigns array, or empty array if no data
+        } catch (error: any) {
+            console.error('Error fetching campaigns:', {
+                message: error.message,
+                code: error.code,
+                subcode: error.subcode,
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
+            });
             throw error;
         }
     }
@@ -535,14 +560,39 @@ export class FacebookService {
     // Get ad sets for a campaign
     async getAdSets(campaignId: string) {
         try {
-            // Campaign constructor should pick up global API
-            const campaign = new Campaign(campaignId); // Removed this.api
-            const adSets = await campaign.getAdSets(
-                ['id', 'name', 'status', 'daily_budget', 'lifetime_budget']
-            );
-            return adSets;
-        } catch (error) {
-            console.error('Error fetching ad sets:', error);
+            if (!this.adAccountId) {
+                throw new Error('Ad Account ID is required');
+            }
+
+            const adSetsUrl = `https://graph.facebook.com/v22.0/${campaignId}/adsets`;
+            const response = await axios.get(adSetsUrl, {
+                params: {
+                    fields: [
+                        'id',
+                        'name',
+                        'status',
+                        'daily_budget',
+                        'lifetime_budget',
+                        'campaign_id',
+                        'targeting',
+                        'optimization_goal',
+                        'billing_event',
+                        'bid_amount'
+                    ].join(','),
+                    access_token: this.accessToken
+                }
+            });
+
+            console.log('Ad Sets response:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error fetching ad sets:', {
+                message: error.message,
+                code: error.code,
+                subcode: error.subcode,
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
+            });
             throw error;
         }
     }
@@ -555,7 +605,7 @@ export class FacebookService {
                 ...data,
             };
             // AdSet.create should pick up global API
-            return await (AdSet as any).create(this.adAccount.id, params); // Removed { api: this.api }
+            return await (AdSet as any).create(this.adAccount?.id, params); // Removed { api: this.api }
         } catch (error) {
             console.error('Error creating ad set:', error);
             throw error;
@@ -565,14 +615,38 @@ export class FacebookService {
     // Get ads for an ad set
     async getAds(adSetId: string) {
         try {
-            // AdSet constructor should pick up global API
-            const adSet = new AdSet(adSetId); // Removed this.api
-            const ads = await adSet.getAds(
-                ['id', 'name', 'status', 'creative']
-            );
-            return ads;
-        } catch (error) {
-            console.error('Error fetching ads:', error);
+            if (!this.adAccountId) {
+                throw new Error('Ad Account ID is required');
+            }
+
+            const adsUrl = `https://graph.facebook.com/v22.0/${adSetId}/ads`;
+            const response = await axios.get(adsUrl, {
+                params: {
+                    fields: [
+                        'id',
+                        'name',
+                        'status',
+                        'creative',
+                        'adset_id',
+                        'campaign_id',
+                        'created_time',
+                        'updated_time',
+                        'tracking_specs'
+                    ].join(','),
+                    access_token: this.accessToken
+                }
+            });
+
+            console.log('Ads response:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error fetching ads:', {
+                message: error.message,
+                code: error.code,
+                subcode: error.subcode,
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
+            });
             throw error;
         }
     }
@@ -585,7 +659,7 @@ export class FacebookService {
                 ...data,
             };
             // Ad.create should pick up global API
-            return await (Ad as any).create(this.adAccount.id, params); // Removed { api: this.api }
+            return await (Ad as any).create(this.adAccount?.id, params); // Removed { api: this.api }
         } catch (error) {
             console.error('Error creating ad:', error);
             throw error;
@@ -595,13 +669,45 @@ export class FacebookService {
     // Get ad account insights
     async getInsights(params: any = {}) {
         try {
-            const insights = await this.adAccount.getInsights(
-                ['impressions', 'clicks', 'spend', 'reach'],
-                params
-            );
-            return insights;
-        } catch (error) {
-            console.error('Error fetching insights:', error);
+            if (!this.adAccountId) {
+                throw new Error('Ad Account ID is required');
+            }
+
+            const insightsUrl = `https://graph.facebook.com/v22.0/${this.adAccountId}/insights`;
+            const response = await axios.get(insightsUrl, {
+                params: {
+                    fields: [
+                        'impressions',
+                        'clicks',
+                        'spend',
+                        'reach',
+                        'cpc',
+                        'cpm',
+                        'ctr',
+                        'frequency',
+                        'unique_clicks',
+                        'unique_ctr',
+                        'social_reach',
+                        'social_impressions',
+                        'social_clicks',
+                        'social_spend'
+                    ].join(','),
+                    time_range: params.time_range || { 'since': '2024-01-01', 'until': '2024-12-31' },
+                    level: params.level || 'account',
+                    access_token: this.accessToken
+                }
+            });
+
+            console.log('Insights response:', response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error fetching insights:', {
+                message: error.message,
+                code: error.code,
+                subcode: error.subcode,
+                error_user_msg: error.error_user_msg,
+                response: error.response?.data
+            });
             throw error;
         }
     }
@@ -693,7 +799,7 @@ export class FacebookService {
     private async connectPageToAdAccount(pageId: string) {
         try {
             // Ensure we're using the correct ad account ID format
-            const adAccountId = this.adAccount.id;
+            const adAccountId = this.adAccount?.id;
             // This call seems to be assigning the app's user to the ad account within the business.
             // This is a Business Manager operation, not directly linking a page for advertising.
             // For advertising, you'd typically select the page when creating an ad creative.
@@ -720,16 +826,14 @@ export class FacebookService {
         try {
             console.log('=== getPages: Starting API call ===');
             
-            // First get business info to ensure we have the business ID
-            const businessInfo = await this.getBusinessInfo();
-            const businessId = businessInfo.businesses.data[0]?.id;
-            
-            if (!businessId) {
-                throw new Error('No business found. Please create a business first.');
+            // First get user info to get the Facebook user ID
+            const userInfo = await this.getUserInfo();
+            if (!userInfo || !userInfo.id) {
+                throw new Error('Failed to get Facebook user ID');
             }
 
-            // Get pages through the business account
-            const pagesUrl = `https://graph.facebook.com/v22.0/${businessId}/owned_pages`;
+            // Get pages through the user account
+            const pagesUrl = `https://graph.facebook.com/v22.0/${userInfo.id}/accounts`;
             console.log('getPages: Calling Facebook Graph API:', pagesUrl);
             
             const pagesParams = {
