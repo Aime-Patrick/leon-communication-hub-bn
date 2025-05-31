@@ -480,42 +480,36 @@ export class FacebookService {
     // Create a new campaign
     async createCampaign(data: CampaignData) {
         try {
-            // First verify permissions
-            const permissions = await this.verifyPermissions();
-            console.log('Permissions verified:', permissions);
-
-            // Verify page association - this is now required
-            const pages = await this.verifyPageAssociation();
-            console.log(pages)
-            if (!pages || pages.length === 0) {
-                throw new Error('No Facebook Pages associated with this ad account. Please create a page first using the /api/facebook/pages endpoint.');
+            if (!this.adAccount) {
+                throw new Error('Ad Account not initialized');
             }
 
+            // Validate campaign data
             this.validateCampaignData(data);
-            
-            const params = {
-                name: data.name,
-                objective: data.objective,
-                status: data.status || 'PAUSED',
-                special_ad_categories: data.special_ad_categories || [],
-                buying_type: data.buying_type || 'AUCTION',
-                campaign_optimization_type: data.campaign_optimization_type || 'NONE'
-            };
 
+            // First verify permissions
+            await this.verifyPermissions();
 
-            // Create campaign using the correct method
-            const campaign = await (this.adAccount as any).createCampaign(
+            // Create the campaign using the Facebook SDK with v22.0
+            const campaign = await this.adAccount.createCampaign(
                 [],
-                params
+                {
+                    name: data.name,
+                    objective: data.objective,
+                    status: data.status || 'PAUSED',
+                    special_ad_categories: data.special_ad_categories || [],
+                    buying_type: data.buying_type || 'AUCTION',
+                    campaign_optimization_type: data.campaign_optimization_type || 'NONE'
+                }
             );
+
+            console.log('Campaign created successfully:', campaign.id);
             return campaign;
         } catch (error: any) {
-            console.error('Error creating campaign:', {
-                message: error.message,
-                code: error.code,
-                subcode: error.subcode,
-                error_user_msg: error.error_user_msg
-            });
+            console.error('Error creating campaign:', error);
+            if (error.message.includes('Application does not have the capability')) {
+                throw new Error('Your Facebook app needs to be configured for the Marketing API. Please ensure your app has the "ads_management" capability enabled in the Facebook Developer Console.');
+            }
             throw error;
         }
     }

@@ -1,6 +1,13 @@
 import mongoose, { Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
+interface InstagramData {
+    accessToken: string;
+    userId: string;
+    username: string;
+    businessAccountId?: string;
+}
+
 export interface IUser extends Document {
     name: string;
     email: string;
@@ -31,6 +38,8 @@ export interface IUser extends Document {
         refreshToken: string;
         expiresAt: Date;
     };
+
+    instagram?: InstagramData;
 
     createdAt: Date;
     updatedAt: Date;
@@ -113,6 +122,13 @@ const userSchema = new mongoose.Schema({
             type: Date,
             required: false
         }
+    },
+
+    instagram: {
+        accessToken: String,
+        userId: String,
+        username: String,
+        businessAccountId: String
     }
 }, {
     timestamps: true,

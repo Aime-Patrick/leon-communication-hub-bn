@@ -42,6 +42,7 @@
     "@types/cors": "^2.8.18",
     "@types/express": "^5.0.1",
     "@types/facebook-nodejs-business-sdk": "^22.0.0",
-    "@types/morgan": "^1.9.9"
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^22.15.24"
   }
 }

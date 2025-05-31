@@ -373,26 +373,40 @@ router.get('/campaigns', async (req, res) => {
     }
 });
 
-router.post('/campaigns', async (req, res) => {
+/**
+ * POST /api/facebook/campaigns
+ * Creates a new Facebook ad campaign.
+ */
+router.post('/campaigns', async (req: AuthRequest, res) => {
     try {
-        const facebookService: FacebookService = (req as any).facebookService;
-        const campaignData: CampaignData = req.body;
+        const user = req.user as IUser;
+        if (!user.facebookAccessToken) {
+            res.status(401).json({
+                error: 'Facebook Not Connected',
+                message: 'Please connect your Facebook account first.'
+            });
+            return;
+        }
+
+        const facebookService = new FacebookService(
+            user.facebookAccessToken,
+            user.facebookAdAccountId
+        );
+
+        const campaignData: CampaignData = {
+            name: req.body.name,
+            objective: req.body.objective,
+            status: req.body.status,
+            special_ad_categories: req.body.special_ad_categories,
+            buying_type: req.body.buying_type,
+            campaign_optimization_type: req.body.campaign_optimization_type
+        };
+
         const campaign = await facebookService.createCampaign(campaignData);
         res.json(campaign);
     } catch (error: any) {
-        if (error.message.includes('No Facebook Pages associated')) {
-            res.status(400).json({
-                error: 'Page Required',
-                message: 'You need to create a Facebook Page before creating a campaign.',
-                details: error.message,
-                nextSteps: [
-                    'Use the /api/facebook/pages endpoint to create a new page',
-                    'After creating the page, try creating the campaign again'
-                ]
-            });
-        } else {
-            sendErrorResponse(res, 500, error, 'Failed to create campaign');
-        }
+        console.error('Error creating campaign:', error);
+        sendErrorResponse(res, 500, error, 'Failed to create campaign');
     }
 });
 
