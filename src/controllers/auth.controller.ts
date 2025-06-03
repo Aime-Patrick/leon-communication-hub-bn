@@ -106,6 +106,7 @@ export const register: RequestHandler = async (req: Request, res: Response): Pro
         const token = generateToken(user);
 
         res.status(201).json({
+            message: 'User registered successfully',
             token,
             user: {
                 id: user._id,
@@ -193,7 +194,7 @@ export const requestPasswordReset: RequestHandler = async (req: Request, res: Re
         await user.save();
 
         // Create reset URL
-        const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+        const resetUrl = `${process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL_PROD : process.env.FRONTEND_URL_DEV}/reset-password?token=${resetToken}`;
 
         // Send reset email
         const emailContent = getResetPasswordEmailTemplate(resetUrl, user.name);

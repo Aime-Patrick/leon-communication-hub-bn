@@ -28,7 +28,7 @@ export const getResetPasswordEmailTemplate = (resetUrl: string, userName: string
                     display: inline-block;
                     padding: 12px 24px;
                     background-color: #4F46E5;
-                    color: white;
+                    color:rgb(255, 255, 255);
                     text-decoration: none;
                     border-radius: 5px;
                     margin: 20px 0;

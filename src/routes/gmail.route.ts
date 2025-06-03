@@ -43,7 +43,7 @@ const verifyGmailToken = async (
     const user = await User.findById(userId);
     if (!user?.gmailAccessToken || !user?.gmailRefreshToken) {
       res.status(401).json({
-        error: "No Gmail tokens found",
+        error: "PLease connect your Gmail account first",
         success: false,
       });
       return;
@@ -97,6 +97,20 @@ const verifyGmailToken = async (
     });
   }
 };
+
+router.get('/verify', auth.protect, verifyGmailToken, async (req: AuthRequest, res: Response) => {
+  try{
+    res.json({
+      success: true,
+    });
+  }catch (error) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to verify Gmail token",
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+})
 
 // Get Gmail statistics
 router.get("/stats", auth.protect, verifyGmailToken, async (req: AuthRequest, res: Response) => {

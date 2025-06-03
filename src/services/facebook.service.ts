@@ -161,7 +161,6 @@ export class FacebookService {
             
             // Initialize the global API instance with the access token
             this.api = FacebookAdsApi.init(this.accessToken);
-            console.log('FacebookService: API initialized');
             
             // Set up adAccount if adAccountId is provided
             if (adAccountId) {
@@ -171,12 +170,11 @@ export class FacebookService {
                 
                 // Create the AdAccount instance
                 this.adAccount = new AdAccount(this.adAccountId);
-                console.log('FacebookService: AdAccount initialized with ID:', this.adAccountId);
+                
             } else {
-                console.log('FacebookService: No Ad Account ID provided, some features will be limited');
+                this.adAccount = null;
             }
         } catch (error: any) {
-            console.error('FacebookService initialization error:', error);
             throw new Error(`Failed to initialize Facebook service: ${error.message}`);
         }
     }
@@ -315,8 +313,6 @@ export class FacebookService {
                 if (missingPermissions.length > 0) {
                     throw new Error(`Missing required permissions: ${missingPermissions.join(', ')}. Please request these permissions when generating a new token.`);
                 }
-
-                console.log('Access token verified successfully with permissions:', grantedPermissions);
                 return;
             } catch (error: any) {
                 console.error(`Token verification attempt ${i + 1} failed:`, {

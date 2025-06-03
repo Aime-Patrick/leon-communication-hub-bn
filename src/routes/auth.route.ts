@@ -2,7 +2,8 @@ import express, { Request, Response } from 'express';
 import { google } from 'googleapis';
 import { GMAIL_CONFIG } from '../config/gmail.config';
 import { body } from 'express-validator';
-import { auth, protect } from '../middleware/auth';
+import { auth, AuthRequest, protect } from '../middleware/auth';
+import { User } from '../models/User';
 import {
     login,
     register,
@@ -34,6 +35,7 @@ router.get('/google', (req: Request, res: Response): void => {
             scope: scopes,
             prompt: 'consent',
             include_granted_scopes: true,
+            redirect_uri: GMAIL_CONFIG.redirectUri,
             state: Math.random().toString(36).substring(7) // Add state parameter for security
         });
 
@@ -48,8 +50,8 @@ router.get('/google', (req: Request, res: Response): void => {
     }
 });
 
-// Handle OAuth callback
-router.get('/google/callback', async (req: Request, res: Response): Promise<void> => {
+// Handle OAuth callback (protected)
+router.get('/google/callback', protect, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { code, error } = req.query;
         
@@ -70,20 +72,41 @@ router.get('/google/callback', async (req: Request, res: Response): Promise<void
         console.log('Received authorization code');
         
         try {
-            const { tokens } = await oauth2Client.getToken(code);
+            const { tokens } = await oauth2Client.getToken({
+                code,
+                redirect_uri: GMAIL_CONFIG.redirectUri // <-- Must match exactly!
+            });
             console.log('Successfully obtained tokens');
             
             if (!tokens.refresh_token) {
                 throw new Error('No refresh token received');
             }
 
-            // Store the refresh token securely
-            // In production, you should store this in a secure database
-            console.log('Refresh Token:', tokens.refresh_token);
-            
             // Set up the OAuth2 client with the new tokens
             oauth2Client.setCredentials(tokens);
-            
+            const userId = req.user?.id;
+            console.log('Authenticated user ID:', userId);
+            if (!userId) {
+                res.status(401).json({ error: 'User not authenticated' });
+                return;
+            }
+
+            // Save tokens to the user in the database
+            const user = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({ error: 'User not found' });
+                return;
+            }
+
+            user.gmailAccessToken = tokens.access_token;
+            user.gmailRefreshToken = tokens.refresh_token;
+
+            if (tokens.expiry_date) {
+                user.gmailAccessTokenExpires = new Date(tokens.expiry_date);
+            }
+
+            await user.save();
+
             res.json({
                 message: 'Authentication successful',
                 accessToken: tokens.access_token
@@ -158,4 +181,4 @@ router.post('/reset-password',
     resetPassword as any
 );
 
-export default router; 
+export default router;

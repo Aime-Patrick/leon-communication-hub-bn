@@ -56,13 +56,15 @@ const upload = multer({
         fileSize: 1024 * 1024 * 1024, // 1GB limit
     },
     fileFilter: (req, file, cb) => {
-        // Accept only video files
-        if (file.mimetype.startsWith('video/')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only video files are allowed'));
-        }
+    if (
+        file.mimetype.startsWith('video/') ||
+        file.mimetype.startsWith('image/')
+    ) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only image and video files are allowed'));
     }
+}
 });
 
 // --- OAuth Authentication Endpoints --- 
@@ -316,11 +318,9 @@ router.get('/auth/callback', protect, async (req: AuthRequest, res: Response): P
 
 router.use(protect);
 router.use(async (req:AuthRequest, res, next) => {
-    console.log('--- Facebook Router Protected Middleware ---');
     const user: IUser = req.user as IUser;
     console.log('user', user);
     if (!user) {
-        console.error('Facebook Router Protected Middleware: User not authenticated (req.user is null/undefined).');
         res.status(401).json({
             error: 'Authentication Required',
             message: 'User not authenticated in your application. Please log in first.'
@@ -331,12 +331,7 @@ router.use(async (req:AuthRequest, res, next) => {
     const facebookAccessToken = user.facebookAccessToken;
     const facebookAdAccountId = user.facebookAdAccountId;
 
-    console.log('Facebook Router Protected Middleware: User email:', user.email);
-    console.log('Facebook Router Protected Middleware: Token from DB (first 30 chars):', facebookAccessToken?.substring(0, 30) + '...');
-    console.log('Facebook Router Protected Middleware: Ad Account ID from DB:', facebookAdAccountId);
-
     if (!facebookAccessToken) {
-        console.error('Facebook Router Protected Middleware: Missing Facebook access token in DB.');
         res.status(401).json({
             error: 'Facebook Integration Required',
             message: 'Your Facebook account is not connected. Please visit /api/facebook/auth/login to connect.'
@@ -346,7 +341,6 @@ router.use(async (req:AuthRequest, res, next) => {
 
     // Initialize FacebookService with just the access token
     (req as any).facebookService = new FacebookService(facebookAccessToken, facebookAdAccountId);
-    console.log('Facebook Router Protected Middleware: FacebookService initialized successfully.');
     next();
 });
 
@@ -634,7 +628,10 @@ router.put('/pages/:pageId', protect, async (req: AuthRequest, res) => {
     }
 });
 
-router.post('/pages/:pageId/posts', protect, async (req: AuthRequest, res) => {
+router.post('/pages/:pageId/posts', protect, upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'video', maxCount: 1 }
+]), async (req: AuthRequest, res:Response) => {
     try {
         const user: IUser = req.user as IUser;
         if (!user || !user.facebookAccessToken) {
@@ -649,6 +646,8 @@ router.post('/pages/:pageId/posts', protect, async (req: AuthRequest, res) => {
         const facebookService = new FacebookService(user.facebookAccessToken);
         const { pageId } = req.params;
         const content = req.body;
+
+        console.log('POST /pages/:pageId/posts: Creating post with content:', content);
 
         // First get the page access token
         const pageInfo = await facebookService.getPageInfo(pageId, user.facebookAccessToken);
