@@ -1,6 +1,8 @@
 import axios from 'axios';
 import {INSTAGRAM_CONFIG} from '../config/instagram.config'
 import { User, IUser } from '../models/User';
+import dotenv from 'dotenv';
+dotenv.config();
 
 // Type definitions for Instagram data
 export type InstagramMediaType = 'IMAGE' | 'VIDEO' | 'CAROUSEL_ALBUM' | 'REEL' | 'STORY';
@@ -37,16 +39,19 @@ export interface InstagramBusinessAccount {
     media_count?: number;
 }
 
+const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN;
+
 export class InstagramService {
     private accessToken: string;
     private businessAccountId?: string;
 
-    constructor(accessToken: string, businessAccountId?: string) {
-        if (!accessToken) {
+    constructor(accessToken?: string, businessAccountId?: string) {
+        // Use provided token or fallback to env token for development
+        this.accessToken = accessToken || INSTAGRAM_ACCESS_TOKEN!;
+        this.businessAccountId = businessAccountId;
+        if (!this.accessToken) {
             throw new Error('Access token is required');
         }
-        this.accessToken = accessToken;
-        this.businessAccountId = businessAccountId;
     }
 
     /**

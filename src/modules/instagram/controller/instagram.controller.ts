@@ -3,8 +3,10 @@ import dotenv from "dotenv";
 import { InstagramService } from '../../../services/instagram.service';
 import { INSTAGRAM_CONFIG } from '../../../config/instagram.config';
 import { User } from '../../../models/User';
+import { FACEBOOK_CONFIG } from "../../../config/facebook.config";
 dotenv.config();
-const VERIFY_TOKEN = process.env.INSTAGRAM_VERIFY_TOKEN;
+const VERIFY_TOKEN = process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN;
+const BUSINESS_ACCOUNT_ID = process.env.BUSINESS_ID;
 
 export const verifyWebhook = (req: Request, res: Response) => {
   const mode = req.query["hub.mode"];
@@ -148,11 +150,13 @@ export class InstagramController {
     static async getProfile(req: Request, res: Response) {
         try {
             const user = await User.findById(req.user?._id);
-            if (!user?.instagram?.accessToken) {
+            // Use user's token if present, otherwise use dev token
+            const accessToken = user?.instagram?.accessToken || VERIFY_TOKEN;
+            if (!accessToken) {
                 return res.status(400).json({ error: 'Instagram account not connected' });
             }
 
-            const instagramService = new InstagramService(user.instagram.accessToken);
+            const instagramService = new InstagramService(accessToken);
             const profile = await instagramService.getUserProfile();
             res.json(profile);
         } catch (error: any) {
@@ -167,11 +171,12 @@ export class InstagramController {
     static async getMedia(req: Request, res: Response) {
         try {
             const user = await User.findById(req.user?._id);
-            if (!user?.instagram?.accessToken) {
+            const accessToken = user?.instagram?.accessToken || VERIFY_TOKEN;
+            if (!accessToken) {
                 return res.status(400).json({ error: 'Instagram account not connected' });
             }
 
-            const instagramService = new InstagramService(user.instagram.accessToken);
+            const instagramService = new InstagramService(accessToken);
             const media = await instagramService.getMedia();
             res.json(media);
         } catch (error: any) {
@@ -186,16 +191,17 @@ export class InstagramController {
     static async createPost(req: Request, res: Response) {
         try {
             const user = await User.findById(req.user?._id);
-            if (!user?.instagram?.accessToken) {
+            const accessToken = user?.instagram?.accessToken || VERIFY_TOKEN;
+            if (!accessToken) {
                 return res.status(400).json({ error: 'Instagram account not connected' });
             }
+
+            const instagramService = new InstagramService(accessToken);
 
             const { image_url, video_url, caption, media_type } = req.body;
             if (!image_url && !video_url) {
                 return res.status(400).json({ error: 'Either image_url or video_url is required' });
             }
-
-            const instagramService = new InstagramService(user.instagram.accessToken);
             const result = await instagramService.createMediaPost({
                 image_url,
                 video_url,
@@ -216,11 +222,13 @@ export class InstagramController {
     static async getInsights(req: Request, res: Response) {
         try {
             const user = await User.findById(req.user?._id);
-            if (!user?.instagram?.accessToken) {
+            const accessToken = user?.instagram?.accessToken || VERIFY_TOKEN;
+            const businessAccountId = user?.instagram?.userId || FACEBOOK_CONFIG.businessId;
+            if (!accessToken) {
                 return res.status(400).json({ error: 'Instagram account not connected' });
             }
 
-            const instagramService = new InstagramService(user.instagram.accessToken);
+            const instagramService = new InstagramService(accessToken, businessAccountId);
             const insights = await instagramService.getAccountInsights();
             res.json(insights);
         } catch (error: any) {
